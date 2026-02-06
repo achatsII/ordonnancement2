@@ -231,13 +231,21 @@ async def solve_production(req: SolveRequest):
     else:
         model.add(total_weighted_tardiness == 0)
 
-    # Objective: Minimize Weighted Tardiness (Primary) + Makespan (Secondary)
+    # Objective: Minimize Weighted Tardiness (Primary) + Makespan (Secondary) + StartTimes (Tertiary/Tie-Breaker)
     # Scaled to prioritize tardiness
-    model.minimize(total_weighted_tardiness * 10 + makespan)
+    # Adding 'start_vars' sum helps compact the schedule to the left, reducing "floating" tasks and stabilizing results.
+    all_start_ints = []
+    for job_idx, job in enumerate(req.jobs):
+         for t_idx in range(len(job.tasks)):
+             all_start_ints.append(job_starts[job_idx, t_idx])
+    
+    model.minimize(total_weighted_tardiness * 10000 + makespan * 100 + sum(all_start_ints))
 
     # Solve
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 10.0
+    # FORCE DETERMINISM: Single thread ensures results are identical for the same input
+    solver.parameters.num_search_workers = 1 
     status = solver.solve(model)
 
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
