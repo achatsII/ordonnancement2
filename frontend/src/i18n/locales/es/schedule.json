@@ -1,0 +1,28 @@
+{
+    "title": "Programación",
+    "generate_schedule": "Generar programación",
+    "optimize": "Optimizar",
+    "orders": {
+        "title": "Órdenes de producción",
+        "add_order": "Agregar orden",
+        "no_orders": "Sin órdenes",
+        "select_product": "Seleccionar producto",
+        "order_type": "Tipo de orden"
+    },
+    "order_types": {
+        "production": "Producción",
+        "color_change": "Cambio de color",
+        "cleaning": "Limpieza",
+        "preventive_maintenance": "Mantenimiento preventivo",
+        "tool_change": "Cambio de herramienta",
+        "quality_control": "Control de calidad"
+    },
+    "gantt": {
+        "no_schedule": "Sin programación generada",
+        "zoom": "Zoom",
+        "view_mode": "Modo de vista",
+        "hour": "Hora",
+        "day": "Día",
+        "week": "Semana"
+    }
+}

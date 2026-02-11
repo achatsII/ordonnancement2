@@ -1,0 +1,161 @@
+import axios from 'axios';
+
+const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://qa.gateway.intelligenceindustrielle.com';
+const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InZUZHJUTTNzQmRRcmtmb0oifQ.eyJpc3MiOiJodHRwczovL3BiY3Vzam5reGJ5aWtyZ293YXRjLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI3NmYxYjY5Yy05YmQyLTRjY2UtOTlhNC1kMGNkOTdjNTk5MzkiLCJhdWQiOiJ2MCIsImlhdCI6MTc2Mjk4MzgxMiwiZXhwIjoyMDc4NTUzMzMyLCJlbWFpbCI6InYwQGV4YW1wbGUuY29tIiwiZ3JhbnRfaWQiOiJhZTFiYTkzMC1jNDQyLTQwNTMtYjhhOC04MzZlZDM0MGEzYzgiLCJvcmdhbml6YXRpb24iOnsiaWQiOiJjMjE3OWJiNC03OGQyLTRmZWMtYjU0Zi01YTE4MDg3MDY0NjUiLCJuYW1lIjoiRMOpdmVsb3BwZXVyIHYwIiwicm9sZSI6InVzZXIifSwiYXBwbGljYXRpb24iOnsiaWQiOiIyNGE1MWQxYi04MzkyLTQzN2UtODE3MS0zZWU3MDJhOTJjNzciLCJuYW1lIjoiUHJvamV0IHYwIiwiaWRlbnRpZmllciI6InYwIn0sInJvbGUiOiJ1c2VyIiwic2NvcGVzIjpbIioiXSwibWV0YWRhdGEiOnt9fQ.V5zrL3u2z6HGhMkzBCjlozc-CEtYQicPwGbBkCEfaFs';
+
+const client = axios.create({
+    baseURL: GATEWAY_URL,
+    headers: {
+        'Authorization': `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+    },
+});
+
+export const gateway = {
+    // Auth
+    getMe: async () => {
+        const res = await client.get('/api/v1/auth/me');
+        return res.data;
+    },
+
+    // Data (CRUD)
+    saveData: async (dataType: string, data: any, description?: string) => {
+        const res = await client.post(`/api/v1/data/${dataType}`, {
+            json_data: data,
+            description,
+            app_identifier: 'ordonnancement-app'
+        });
+        return res.data;
+    },
+
+    getAllData: async (dataType: string, projection?: any) => {
+        const res = await client.get(`/api/v1/data/${dataType}/all`, {
+            // data: { projection } // Removing body from GET as it causes issues with some proxies/browsers
+        });
+        return res.data;
+    },
+
+    deleteData: async (dataType: string, id: string) => {
+        const res = await client.delete(`/api/v1/data/${dataType}/${id}`);
+        return res.data;
+    },
+
+    updateData: async (dataType: string, id: string, data: any) => {
+        const res = await client.put(`/api/v1/data/${dataType}/one/${id}`, {
+            json_data: data
+        });
+        return res.data;
+    },
+
+    // Conversations Management
+    getConversations: async () => {
+        // We'll trust the caller to handle sorting/filtering if needed, or add it later
+        // Currently just gets all 'conversations' data type
+        return gateway.getAllData('conversations');
+    },
+
+    saveConversation: async (conversationId: string | undefined, messages: any[], title: string = 'New Conversation') => {
+        if (conversationId) {
+            // Update existing
+            // Note: In real app, we might want to fetch first to merge? Or just overwrite messages.
+            // Here we assume we have the full state including title.
+            // If the API supported partial PATCH for json_data it would be better, but we use PUT for the record.
+            // Wait, updateData uses PUT on /one/{id}, so we need to be careful not to lose other fields if any.
+            // For now, we just update messages and updated_at.
+            return gateway.updateData('conversations', conversationId, {
+                messages,
+                title,
+                updatedAt: new Date().toISOString()
+            });
+        } else {
+            // Create New
+            return gateway.saveData('conversations', {
+                messages,
+                title,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            }, title);
+        }
+    },
+
+    deleteConversation: async (conversationId: string) => {
+        return gateway.deleteData('conversations', conversationId);
+    },
+
+    // AI Assistant
+    askAI: async (prompt: string, context?: string, jsonSchema?: any, history: any[] = [], language: string = 'fr') => {
+        const systemInstruction = context
+            ? `You are an expert scheduler assistant. Context: ${context}. IMPORTANT: Respond in ${language}.`
+            : `You are an expert scheduler assistant. IMPORTANT: Respond in ${language}.`; // Default system instructions with language
+
+        const payload: any = {
+            prompt,
+            system_instruction: systemInstruction,
+            provider: 'google',
+            level: 'mid',
+            history,
+        };
+
+        if (jsonSchema) {
+            payload.json_schema = jsonSchema;
+        }
+
+        console.log("askAI REQUEST PAYLOAD:", JSON.stringify(payload, null, 2)); // DEBUG Log
+
+        const res = await client.post('/api/v2/assistant/ask', payload);
+        console.log("askAI RAW RES:", res.data); // DEBUG Log
+
+        // Parse response if it's a stringified JSON (happens with json_schema)
+        let answer = res.data.results.assistant_response;
+        if (jsonSchema && typeof answer === 'string') {
+            try {
+                answer = JSON.parse(answer);
+            } catch (e) {
+                console.warn("Failed to parse structured AI response", e);
+            }
+        }
+        return answer;
+    },
+
+    // ===== PERSISTENCE =====
+    saveOrders: async (orders: any[]) => {
+        return gateway.saveData('active_orders', orders, 'Current Production Orders');
+    },
+
+    loadOrders: async () => {
+        const res = await gateway.getAllData('active_orders');
+        if (res.results && res.results.length > 0) {
+            // Sort by createdAt desc
+            const latest = res.results.sort((a: any, b: any) =>
+                new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+            )[0];
+            return latest.json_data;
+        }
+        return [];
+    },
+
+    saveSchedule: async (schedule: any) => {
+        return gateway.saveData('active_schedule', schedule, 'Latest Optimization Result');
+    },
+
+    loadSchedule: async () => {
+        const res = await gateway.getAllData('active_schedule');
+        if (res.results && res.results.length > 0) {
+            const latest = res.results.sort((a: any, b: any) =>
+                new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+            )[0];
+            return latest.json_data;
+        }
+        return null;
+    },
+
+    simulateWhatIf: async (scenario: any, currentSolveRequest: any, currentTasks: any[]) => {
+        const SOLVER_URL = process.env.NEXT_PUBLIC_SOLVER_URL || 'http://localhost:8000';
+        const res = await client.post(`${SOLVER_URL}/whatif/simulate`, {
+            scenario,
+            currentSolveRequest,
+            currentTasks
+        });
+        return res.data;
+    }
+};

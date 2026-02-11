@@ -1,0 +1,47 @@
+{
+  "nav": {
+    "overview": "Vue d'ensemble",
+    "schedule": "Ordonnancement",
+    "machines": "Machines",
+    "factory_floor": "Plancher d'usine",
+    "chat": "Assistant IA"
+  },
+  "actions": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "add": "Ajouter",
+    "import": "Importer",
+    "export": "Exporter",
+    "close": "Fermer",
+    "history": "Historique",
+    "restore": "Restaurer"
+  },
+  "common": {
+    "loading": "Chargement...",
+    "error": "Erreur",
+    "success": "Succès",
+    "confirm": "Confirmer",
+    "name": "Nom",
+    "description": "Description",
+    "type": "Type",
+    "status": "Statut",
+    "priority": "Priorité",
+    "deadline": "Échéance",
+    "duration": "Durée",
+    "quantity": "Quantité"
+  },
+  "priority": {
+    "low": "Basse",
+    "normal": "Normale",
+    "high": "Haute",
+    "urgent": "Urgente"
+  },
+  "status": {
+    "pending": "En attente",
+    "scheduled": "Planifié",
+    "in_progress": "En cours",
+    "completed": "Terminé"
+  }
+}

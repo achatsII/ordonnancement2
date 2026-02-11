@@ -1,0 +1,28 @@
+{
+    "title": "Ordonnancement",
+    "generate_schedule": "Générer l'ordonnancement",
+    "optimize": "Optimiser",
+    "orders": {
+        "title": "Commandes de production",
+        "add_order": "Ajouter une commande",
+        "no_orders": "Aucune commande",
+        "select_product": "Sélectionner un produit",
+        "order_type": "Type de commande"
+    },
+    "order_types": {
+        "production": "Production",
+        "color_change": "Changement de couleur",
+        "cleaning": "Nettoyage",
+        "preventive_maintenance": "Maintenance préventive",
+        "tool_change": "Changement d'outillage",
+        "quality_control": "Contrôle qualité"
+    },
+    "gantt": {
+        "no_schedule": "Aucun ordonnancement généré",
+        "zoom": "Zoom",
+        "view_mode": "Mode d'affichage",
+        "hour": "Heure",
+        "day": "Jour",
+        "week": "Semaine"
+    }
+}

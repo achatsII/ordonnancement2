@@ -1,0 +1,28 @@
+{
+    "title": "Schedule",
+    "generate_schedule": "Generate Schedule",
+    "optimize": "Optimize",
+    "orders": {
+        "title": "Production Orders",
+        "add_order": "Add Order",
+        "no_orders": "No orders",
+        "select_product": "Select product",
+        "order_type": "Order type"
+    },
+    "order_types": {
+        "production": "Production",
+        "color_change": "Color Change",
+        "cleaning": "Cleaning",
+        "preventive_maintenance": "Preventive Maintenance",
+        "tool_change": "Tool Change",
+        "quality_control": "Quality Control"
+    },
+    "gantt": {
+        "no_schedule": "No schedule generated",
+        "zoom": "Zoom",
+        "view_mode": "View Mode",
+        "hour": "Hour",
+        "day": "Day",
+        "week": "Week"
+    }
+}

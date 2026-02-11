@@ -1,0 +1,47 @@
+{
+    "nav": {
+        "overview": "Overview",
+        "schedule": "Schedule",
+        "machines": "Machines",
+        "factory_floor": "Factory Floor",
+        "chat": "AI Assistant"
+    },
+    "actions": {
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "edit": "Edit",
+        "add": "Add",
+        "import": "Import",
+        "export": "Export",
+        "close": "Close",
+        "history": "History",
+        "restore": "Restore"
+    },
+    "common": {
+        "loading": "Loading...",
+        "error": "Error",
+        "success": "Success",
+        "confirm": "Confirm",
+        "name": "Name",
+        "description": "Description",
+        "type": "Type",
+        "status": "Status",
+        "priority": "Priority",
+        "deadline": "Deadline",
+        "duration": "Duration",
+        "quantity": "Quantity"
+    },
+    "priority": {
+        "low": "Low",
+        "normal": "Normal",
+        "high": "High",
+        "urgent": "Urgent"
+    },
+    "status": {
+        "pending": "Pending",
+        "scheduled": "Scheduled",
+        "in_progress": "In Progress",
+        "completed": "Completed"
+    }
+}
