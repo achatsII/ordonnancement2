@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, ChevronRight } from 'lucide-react';
 import { MOCK_SOLVER_DATA } from '@/lib/mockData';
+import { Operator } from '@/types/factory';
 
 export default function OperatorLoginPage() {
     const router = useRouter();
@@ -22,7 +23,7 @@ export default function OperatorLoginPage() {
             <p className="text-slate-400 text-center mb-12 text-lg">Select your profile to access your tasks.</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                {MOCK_SOLVER_DATA.operators.map((op) => (
+                {MOCK_SOLVER_DATA.operators.map((op: Operator) => (
                     <button
                         key={op.id}
                         onClick={() => handleLogin(op.id)}

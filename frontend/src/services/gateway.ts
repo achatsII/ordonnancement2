@@ -150,12 +150,16 @@ export const gateway = {
     },
 
     simulateWhatIf: async (scenario: any, currentSolveRequest: any, currentTasks: any[]) => {
-        const SOLVER_URL = process.env.NEXT_PUBLIC_SOLVER_URL || 'http://localhost:8000';
-        const res = await client.post(`${SOLVER_URL}/whatif/simulate`, {
+        const res = await client.post('/api/v1/scheduling/whatif', {
             scenario,
             currentSolveRequest,
             currentTasks
         });
+        return res.data;
+    },
+
+    solve: async (data: any) => {
+        const res = await client.post('/api/v1/scheduling/optimize', data);
         return res.data;
     }
 };

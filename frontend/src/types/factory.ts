@@ -48,6 +48,15 @@ export interface MaintenanceConstraint {
     description?: string;
 }
 
+export interface ResourceAvailability {
+    id: string;
+    resource_id: string;
+    shifts: {
+        start_minute: number;
+        end_minute: number;
+    }[];
+}
+
 export interface Constraints {
     setup_times: SetupTime[];
     temporal: TemporalConstraint[];
@@ -55,6 +64,7 @@ export interface Constraints {
     multi_operator: MultiOperatorConstraint[];
     batching: BatchConstraint[];
     maintenance: MaintenanceConstraint[];
+    resource_availabilities?: ResourceAvailability[];
 }
 
 export interface FactoryConfig {
@@ -116,8 +126,24 @@ export interface ProductionOrder {
 }
 
 
+export interface SolvedTaskResult {
+    id: string;
+    jobId: string;
+    jobName: string;
+    name: string;
+    line: string;
+    start: number;
+    end: number;
+    duration: number;
+    color: string;
+    operatorName: string;
+    priority: number;
+    dueDate: number;
+    manualStart?: number | null;
+}
+
 export interface ScheduleResult {
-    tasks: any[];
+    tasks: SolvedTaskResult[];
     makespan: number;
     logs: string[];
     updatedAt: string;
@@ -186,7 +212,8 @@ export const EmptyFactoryConfig: FactoryConfig = {
         auxiliary_resources: [],
         multi_operator: [],
         batching: [],
-        maintenance: []
+        maintenance: [],
+        resource_availabilities: []
     },
     typical_jobs: []
 };

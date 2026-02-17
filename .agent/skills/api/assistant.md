@@ -1,12 +1,10 @@
----
-description: deuxieme partie des instructions systeme API
----
+# API Assistant Skills
 
-### 2.3 `Assistant`
+### `Assistant`
 
 Les routes `/assistant` permettent d'accéder aux modèles LLM (GPT d'OpenAI, Gemini de Google (par defaut) et Claude d'Anthropic) ainsi qu'à la recherche sur internet via GPT Search.
 
-#### 2.3.1 `POST /api/v2/assistant/ask`
+#### `POST /api/v2/assistant/ask`
 
 - **But :** Permet de poser une question à un modèle LLM (OpenAI, Google (par defaut) ou Anthropic).
 
@@ -253,7 +251,7 @@ Lorsque `json_schema` est utilisé, la valeur de `assistant_response` contient u
 Il est donc nécessaire de faire un `JSON.parse(assistant_response)` pour exploiter la réponse sous forme d’objet JSON.
 
 
-#### 2.3.2 `POST /api/v1/assistant/search
+#### `POST /api/v1/assistant/search
 - **But :** Permet de poser une question à un modèle LLM pour faire une recherche sur Internet
 - **Requête :**
 ```
@@ -299,7 +297,7 @@ POST /api/v1/assistant/search
 }
 ```
 
-#### 2.3.3 `POST /api/v1/assistant/deep-research/start`
+#### `POST /api/v1/assistant/deep-research/start`
 
 * **But :** Démarrer une nouvelle recherche Deep Research en arrière-plan.
   Cette opération crée une tâche asynchrone longue, dont le résultat doit être récupéré via l’endpoint de *polling*.
@@ -340,7 +338,7 @@ POST /api/v1/assistant/deep-research/start
 }
 ```
 
-#### 2.3.4 `POST /api/v1/assistant/deep-research/poll`
+#### `POST /api/v1/assistant/deep-research/poll`
 
 * **But :** Vérifier l’état ou récupérer le résultat final d’une recherche Deep Research.
   Cette opération doit être appelée périodiquement jusqu’à ce que le statut devienne `completed`.
@@ -408,100 +406,3 @@ POST /api/v1/assistant/deep-research/poll
   * `id` : identifiant de la recherche.
   * `status` : (`queued`, `running`, `completed`).
   * `content` : présent uniquement lorsque la recherche est terminée.
-  
-
-### 2.4 `Communication`
-
-#### 2.4.1 `POST /api/v1/communication/sms`
-- **But :** Envoyer un SMS, le numéro doit forcément commencer par +1
-- **Requête :**
-```
-POST /api/v1/communication/sms
-```
-- **Body :**
-```json
-{
-  "receiver": "+19876543211",
-  "message": "Bonjour, ceci est un test SMS depuis l'API !"
-}
-```
-- **Format de réponse :**
-```json
-{
-	"success": true
-}
-```
-
-#### 2.4.2 `POST /api/v1/communication/call`
-- **But :** Envoyer un SMS un numéro, le numéro doit forcément commencer par +1
-- **Requête :**
-```
-POST /api/v1/communication/call
-```
-- **Body :**
-```json
-{
-  "receiver": "+19876543211"
-}
-```
-- **Format de réponse :**
-```json
-{
-  "success": true,
-  "results": [
-    {
-      "status": "Appel effectué avec succès"
-    }
-  ]
-}
-```
-
-#### 2.4.3 `POST /api/v1/communication/email`
-- **But :** Envoyer un email
-- **Requête**
-```
-POST /api/v1/communication/email
-```
-- **Body :**
-```json
-{
-  "recipients": "destinataire1@example.com,destinataire2@example.com",
-  "cc": "cc1@example.com",
-  "bcc": "bcc1@example.com",
-  "subject": "Sujet de l'email",
-  "body": "Contenu de l'email.",
-  "body_type": "html"
-}
-```
-
-### 2.5 `Analytics`
-Ces routes permettent d’interagir avec notre données BigQuery
-
-#### 2.5.1 `POST /api/v1/analytics/query/sql`
-- **But :** Faire une requête SQL à la base BigQuery
-- **Requête :** 
-```
-POST /api/v1/analytics/query/sql
-```
-- **Body :**
-```json
-{
-  "query": "SELECT * FROM `project.dataset.table` WHERE age > 25 LIMIT 10"
-}
-```
-- **Format de réponse :**
-```json
-{
-  "success": true,
-  "results": [
-    {
-      "col1": "valeur1",
-      "col2": 123
-    },
-    {
-      "col1": "valeur2",
-      "col2": 456
-    }
-  ]
-}
-```

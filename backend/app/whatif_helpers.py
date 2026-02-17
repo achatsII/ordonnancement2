@@ -1,5 +1,6 @@
 from typing import List, Dict
 from datetime import datetime, timedelta
+from .models import ResourceAvailability, AvailabilityInterval, SolveRequest
 
 # Helper function to apply What-If modifications
 def apply_whatif_modifications(solve_request, modifications: List) -> any:
@@ -82,6 +83,28 @@ def apply_whatif_modifications(solve_request, modifications: List) -> any:
                                 job.tasks[task_idx].manualStart = int(float(new_start))
                              except (ValueError, TypeError):
                                 print(f"Invalid newStartTime: {new_start}")
+        
+        elif mod_type == 'shift_change':
+            # Add or override availability for a resource
+            resource_id = params.get('resourceId')
+            new_intervals = params.get('intervals', []) # List of {start, end}
+            
+            # Find or create
+            found = False
+            if modified_request.availabilities:
+                for avail in modified_request.availabilities:
+                    if avail.resourceId == resource_id:
+                        avail.intervals = [AvailabilityInterval(**i) for i in new_intervals]
+                        found = True
+                        break
+            
+            if not found:
+                if modified_request.availabilities is None:
+                    modified_request.availabilities = []
+                modified_request.availabilities.append(ResourceAvailability(
+                    resourceId=resource_id,
+                    intervals=[AvailabilityInterval(**i) for i in new_intervals]
+                ))
         
         # Add more modification types as needed
     

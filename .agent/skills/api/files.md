@@ -1,9 +1,98 @@
----
-description: quatrième partie des intructionsapi
----
+# API Files Skills
 
+### `Files`
 
-#### 2.8.3 `POST /api/v1/files/upload/direct`
+#### `POST /api/v1/files/audio/transcribe`
+- **But :** Permet de transcrire un fichier audio
+
+Cette route reçoit un fichier audio ou un champ `audio_url` et renvoie un **texte brut** (sans JSON) contenant la transcription.
+##### Conseils et configuration pour l'enregistrement audio
+1. **Configuration MediaRecorder optimisée pour iOS**
+- Mono (`channelCount: 1`)
+- Fréquence d'échantillonnage : 44.1 kHz
+- Bitrate réduit à 32 kbps via `audioBitsPerSecond: 32000`
+- Traitement audio activé (echoCancellation, autoGainControl, noiseSuppression)
+2. **Stratégie de buffering**
+- Découpage en micro-chunks de 50 ms via `mediaRecorder.start(50)` pour éviter les problèmes de mémoire tampon sur Safari iOS.
+3. **Détection dynamique du format**
+- Évaluer le MIME type supporté par le navigateur
+- Adapter automatiquement l'extension lors de l'envoi POST (webm / wav / mp4 / aac)
+4. **Envoi FormData**
+```javascript
+formData.append('file', audioBlob, `recording_${timestamp}.${fileExtension}`);
+fetch(endpoint, { method: 'POST', body: formData });
+```
+5. **Gestion timeout**
+- Implémenter un `AbortController` avec un timeout de 30 s pour les environnements iOS instables.
+**Avantage technique** : la combinaison du micro-buffering et du bitrate réduit contourne les limitations de WebKit sur iOS, tout en conservant une qualité suffisante pour les moteurs de transcription.
+**Exemple** :
+```
+curl -X POST \
+-F "file=@monAudio.wav" \
+```
+*(Réponse : texte brut.)*
+
+L'idée est d'ajouter un bouton ou icône micro dans vos champs texte : lorsqu'on enregistre un audio, on l'envoie à cet endpoint puis on **ajoute** (sans remplacer) la transcription obtenue dans la zone de saisie.
+
+#### `POST /api/v1/files/upload/generate/link`
+- **But :** Générer un lien d'upload sécurisé
+- **Requête :**
+```
+POST /api/v1/files/upload/generate/link
+```
+- **Body :**
+```json
+{
+  "path": "video-guide/guide1",
+  "allowedTypes": [
+    "image",
+    "video"
+  ],
+  "maxFiles": 3,
+  "redirectUri": "https://www.youtube.com/callback",
+  "validationToken": "test-token-123456"
+}
+```
+
+- **Explication :**
+Génère un lien temporaire sécurisé pour l'upload de fichiers.
+Cette route permet de créer une URL temporaire chiffrée qui peut être utilisée pour permettre l'upload de fichiers par des utilisateurs sans exposer directement les credentials de stockage.
+Redirection après upload:
+- Si `redirectUri` est fournie, l'interface d'upload redirige automatiquement l'utilisateur à la fin du téléversement
+- Les données sont transmises en Base64 avec le format : `{baseUrl, files: ["nom1.ext", "nom2.ext"]}`
+
+- **Format de réponse :**
+```json
+{
+  "finalPath": "test-s3/a091f298-2f2e-414b-966d-4d55b5ef2fc0/video-guide/guide1",
+  "redirectUri": "https://www.youtube.com/callback",
+  "restrictions": {
+    "allowedTypes": [
+      "image",
+      "video"
+    ],
+    "maxFiles": 3,
+    "supportedMimeTypes": [
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "image/svg+xml",
+      "video/mp4",
+      "video/avi",
+      "video/mov",
+      "video/wmv",
+      "video/webm",
+      "video/quicktime"
+    ]
+  },
+  "success": true,
+  "uploadUrl": "http://uploads.tools.intelligenceindustrielle.com/u/50d5c66a60f556a0d9b56bac79add922:40f33eef9b5743112d29da0731ee7033033af4bc702a6a3eb76033a6dc2e32cf447dc09bd244a3d709603bc3141b557221093f0deb8d62a295953ee317ad7ac9346478dfc4f3530841d822a9c573c82f4cfe2fb93f8bb14471883da8454ef2edba090d95d83ca27ddeb12897b60441f9ac344d3da104b758d9b4f4fdacb55e12eb40f40579c13849aea8bd9ab2ee591d38a3ad2c5ebc0d7b7a4a8027ec631bdc706a558227efcf295a8c9010e7d1fcec2735f4bbb6e11a365aef3f1aac34a8ce285f0980df6ee19232138d681f63c599768877ced198eb5bfb45441425e1750b05cb69259f1607cf6835a274aa007d98",
+  "validationToken": "test-token-123456"
+}
+```
+
+#### `POST /api/v1/files/upload/direct`
 - **But :** Permet d'uploader un fichier directement et récupérer un lien du fichier upload
 - **Requête :**
 ```
@@ -48,7 +137,7 @@ curl -X 'POST' \
 }
 ```
 
-#### 2.8.4 `POST /api/v1/files/image/describe`
+#### `POST /api/v1/files/image/describe`
 - **But :** Permet de décrire une image
 - **Requête** :
 ```bash
@@ -70,7 +159,7 @@ curl -X 'POST' \
   ]
 }
 ```
-#### 2.8.5 `POST /api/v1/files/pdf/extract`
+#### `POST /api/v1/files/pdf/extract`
 - **But :** Permet d'extraire le texte d'un PDF
 - **Requête :**
 ```bash
@@ -93,7 +182,7 @@ curl -X 'POST' \
 }
 ```
 
-#### 2.8.6 `POST /api/v1/files/upload/multipart`
+#### `POST /api/v1/files/upload/multipart`
 - **But :** Créer une session d'upload multipart (TUS) pour fichiers volumineux avec reprise sur erreur
 - **Requête :**
 ```
@@ -115,7 +204,7 @@ X-Public-Url: https://bucket.region.digitaloceanspaces.com/path/file.mp4
 X-S3-Key: path/file.mp4
 ```
 
-#### 2.8.7 `PATCH /api/v1/files/upload/multipart/{upload-id}`
+#### `PATCH /api/v1/files/upload/multipart/{upload-id}`
 - **But :** Uploader un chunk de fichier pour une session d'upload multipart existante
 - **Requête :**
 ```
@@ -139,7 +228,7 @@ X-Public-Url: https://bucket.region.digitaloceanspaces.com/path/file.mp4 (si upl
 X-S3-Key: path/file.mp4
 ```
 
-#### 2.8.8 `GET /api/v1/files/upload/multipart/{upload-id}`
+#### `GET /api/v1/files/upload/multipart/{upload-id}`
 - **But :** Vérifier le statut d'un upload multipart (TUS)
 - **Requête :**
 ```
@@ -160,7 +249,7 @@ X-Public-Url: https://bucket.region.digitaloceanspaces.com/path/file.mp4 (si upl
 X-S3-Key: path/file.mp4
 ```
 
-#### 2.8.9 `POST /api/v1/files/video/process`
+#### `POST /api/v1/files/video/process`
 - **But :** Traiter une vidéo (transcodage, normalisation) via URL ou upload direct
 - **Requête :**
 ```
@@ -202,7 +291,7 @@ resolution: "original" (optionnel: original, 480p, 720p, 1080p)
 }
 ```
 
-#### 2.8.10 `POST /api/v1/files/upload/generate/presigned-url`
+#### `POST /api/v1/files/upload/generate/presigned-url`
 - **But :** Générer des URL pré-signées pour un upload direct vers Spaces
 - **Requête :**
 ```
@@ -271,7 +360,7 @@ POST /api/v1/files/upload/generate/presigned-url
 }
 ```
 
-#### 2.8.11 `POST /api/v1/files/gifs/generate`
+#### `POST /api/v1/files/gifs/generate`
 - **But :** Générer des GIFs ou captures d'écran à partir d'une vidéo
 - **Requête :**
 ```
@@ -329,165 +418,3 @@ POST /api/v1/files/gifs/generate
   "errors": []
 }
 ```
-
-### 2.9 `Billing`
-
-Les routes `/billing` permettent de gérer la facturation Stripe, les abonnements et la consommation de fonctionnalités.
-
-> **Note :** Ces routes nécessitent des headers additionnels :
-> - `x-user-id` : ID de l'utilisateur
-> - `x-application` : Identifiant de l'application
-> - `x-org-id` : ID de l'organisation
-
-#### 2.9.1 `POST /api/v1/billing/stripe/checkout-session`
-- **But :** Créer une session de checkout Stripe pour le paiement
-- **Requête :**
-```
-POST /api/v1/billing/stripe/checkout-session
-```
-- **Headers :**
-```
-x-user-id: uuid-user
-x-application: app-identifier
-x-org-id: uuid-org
-Authorization: Bearer token
-```
-- **Body :**
-```json
-{
-  "plan_code": "premium_monthly"
-}
-```
-- **Format de réponse :**
-```json
-{
-  "session_id": "cs_test_1234567890",
-  "url": "https://checkout.stripe.com/pay/cs_test_1234567890"
-}
-```
-
-#### 2.9.2 `POST /api/v1/billing/stripe/portal-session`
-- **But :** Créer une session du portail client Stripe pour la gestion des abonnements
-- **Requête :**
-```
-POST /api/v1/billing/stripe/portal-session
-```
-- **Headers :**
-```
-x-user-id: uuid-user
-x-application: app-identifier
-x-org-id: uuid-org
-Authorization: Bearer token
-```
-- **Body :**
-```json
-{
-  "redirect_url": "https://example.com/billing"
-}
-```
-- **Format de réponse :**
-```json
-{
-  "session_id": "bps_1234567890",
-  "url": "https://billing.stripe.com/p/session_1234567890"
-}
-```
-
-#### 2.9.3 `GET /api/v1/billing/entitlements`
-- **But :** Récupérer les droits d'accès de l'utilisateur/organisation
-- **Requête :**
-```
-GET /api/v1/billing/entitlements
-```
-- **Headers :**
-```
-x-user-id: uuid-user
-x-application: app-identifier
-x-org-id: uuid-org
-Authorization: Bearer token
-```
-- **Format de réponse :**
-```json
-{
-  "entitlements": [
-    {
-      "feature": "ai_generation",
-      "enabled": true,
-      "limit": 1000,
-      "used": 150
-    },
-    {
-      "feature": "data_storage",
-      "enabled": true,
-      "limit": 10000,
-      "used": 2500
-    }
-  ]
-}
-```
-
-#### 2.9.4 `GET /api/v1/billing/balance`
-- **But :** Récupérer le solde de facturation pour une fonctionnalité spécifique
-- **Requête :**
-```
-GET /api/v1/billing/balance?feature_key=ai_generation
-```
-- **Headers :**
-```
-x-user-id: uuid-user
-x-application: app-identifier
-x-org-id: uuid-org
-Authorization: Bearer token
-```
-- **Query Parameters :**
-  - `feature_key` (optionnel) : Clé de la fonctionnalité (ex: "ai_generation")
-- **Format de réponse :**
-```json
-{
-  "balance": 850,
-  "feature": "ai_generation",
-  "last_updated": "2024-01-15T10:30:00Z"
-}
-```
-
-#### 2.9.5 `POST /api/v1/billing/consume`
-- **But :** Consommer des unités de facturation pour une fonctionnalité
-- **Requête :**
-```
-POST /api/v1/billing/consume
-```
-- **Headers :**
-```
-x-user-id: uuid-user
-x-application: app-identifier
-x-org-id: uuid-org
-Authorization: Bearer token
-```
-- **Body :**
-```json
-{
-  "feature_key": "ai_generation",
-  "amount": 1,
-  "metadata": {
-    "model": "gpt-4",
-    "tokens": 150
-  }
-}
-```
-- **Format de réponse :**
-```json
-{
-  "success": true,
-  "remaining_balance": 849,
-  "consumed": 1
-}
-```
-
-> **Note :** En cas de solde insuffisant (402 Payment Required), la réponse sera :
-> ```json
-> {
->   "error": "Insufficient balance",
->   "required_balance": 1,
->   "current_balance": 0
-> }
-> ```

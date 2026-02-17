@@ -80,7 +80,7 @@ export default function FactoryAssetList({ config, onEditMachine, onEditOperator
                 <div className="text-center mt-10 text-slate-400 text-sm p-4">
                     <p>No assets detected yet.</p>
                     <p className="mt-2 text-xs opacity-70">
-                        Try saying: <br /><i>"We have 2 CNC machines operated by Alice and Bob."</i>
+                        Try saying: <br /><i>"We have 3 CNC machines and 2 operators."</i>
                     </p>
                 </div>
             )}

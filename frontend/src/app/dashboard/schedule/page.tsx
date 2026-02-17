@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useProductionState } from '@/contexts/ProductionStateContext';
 import { gateway } from '@/services/gateway';
-import { solver } from '@/services/solver'; // Import solver service
 import GanttChart, { GanttTask } from '@/components/GanttChart';
 import ZoomControls from '@/components/ZoomControls';
 import WhatIfBanner from '@/components/WhatIfBanner';
@@ -118,21 +117,25 @@ export default function SchedulePage() {
                 return;
             }
 
-            const solveRequest = {
+            // 2. Compute Optimization
+            console.log("Calling Optimization API via Gateway...");
+            const solveData = {
                 jobs,
-                lines: activeConfig.machines.map((m: any) => ({
-                    id: m.id || m.name,
-                    name: m.name
+                lines: activeConfig.machines,
+                operators: activeConfig.operators,
+                setupTimes: activeConfig.constraints.setup_times?.map((s: any) => ({
+                    lineId: s.machine,
+                    fromJobId: s.from_product,
+                    toJobId: s.to_product,
+                    duration: s.duration_minutes
                 })),
-                operators: activeConfig.operators.map((o: any) => ({
-                    id: o.id || o.name,
-                    name: o.name,
-                    skills: o.skills || []
+                availabilities: activeConfig.constraints.resource_availabilities?.map((a: any) => ({
+                    resourceId: a.resource_id,
+                    intervals: a.shifts.map((s: any) => ({ start: s.start_minute, end: s.end_minute }))
                 }))
             };
-
-            // 2. Call Solver WITHOUT updating production state
-            const result = await solver.solve(solveRequest);
+            const result = await gateway.solve(solveData);
+            console.log("Optimization Result:", result);
 
             if (result.status === 'success') {
                 const newSimulatedSchedule = {
@@ -151,19 +154,13 @@ export default function SchedulePage() {
                     name: 'Full AI Re-Optimization',
                     description: 'Global re-optimization of all tasks based on current orders.',
                     baseScheduleId: (activeSchedule as any)?.id || 'current',
-                    modifications: [], // Empty because it's a fresh solve, not strictly a modification list
+                    modifications: [],
                     simulatedSchedule: newSimulatedSchedule,
                     createdAt: new Date().toISOString(),
                     status: 'simulated'
                 };
 
                 setCurrentScenario(optimizationScenario);
-
-                // 4. Calculate Mock Impact (Active vs Optimized)
-                // Ideally backend does this, but for now we trust the "visual" comparison or add helper later.
-                // We'll leave impactAnalysis null or compute simple stats if possible.
-                // Setting impactModal to show allows user to see "Changes". for now just success toast.
-
                 toast.success('Optimization proposal generated in Simulation Mode');
             } else {
                 toast.error('Optimization failed');
@@ -249,11 +246,23 @@ export default function SchedulePage() {
                 }
             }
 
+            if (!activeConfig) return;
+
             const solveRequest = {
                 ...activeConfig,
-                jobs: jobs, // ADDED: Specific jobs array required by backend
-                lines: activeConfig?.machines?.map((m: any) => ({ id: m.name, name: m.name })) || [],
-                operators: activeConfig?.operators?.map((o: any) => ({ id: o.name, name: o.name, skills: o.skills })) || []
+                jobs: jobs,
+                lines: activeConfig.machines || [],
+                operators: activeConfig.operators || [],
+                setupTimes: activeConfig.constraints.setup_times?.map((s: any) => ({
+                    lineId: s.machine,
+                    fromJobId: s.from_product,
+                    toJobId: s.to_product,
+                    duration: s.duration_minutes
+                })),
+                availabilities: activeConfig.constraints.resource_availabilities?.map((a: any) => ({
+                    resourceId: a.resource_id,
+                    intervals: a.shifts.map((s: any) => ({ start: s.start_minute, end: s.end_minute }))
+                }))
             };
 
             // 3. Call Backend Simulation
@@ -530,6 +539,85 @@ export default function SchedulePage() {
                                 toast.info("Simulation mode activated. You can now move tasks.");
                             }
                         }}
+                        availabilities={activeConfig?.constraints?.resource_availabilities?.flatMap((ra: any) => {
+                            // Calc masks (inverted shifts)
+                            // Base time is 8:00 AM Today (same as tasks)
+                            const baseTime = new Date();
+                            baseTime.setHours(8, 0, 0, 0);
+
+                            const masks = [];
+                            // Sort shifts
+                            const shifts = (ra.shifts || []).sort((a: any, b: any) => a.start_minute - b.start_minute);
+
+                            let lastEnd = 0;
+                            // Horizon 24h = 1440 min
+                            // If no shifts, machine is CLOSED all day? Or OPEN?
+                            // Usually explicit shifts mean "Only work here".
+                            // But if empty, we assume 24/7 or handled elsewhere. 
+                            // Let's assume if shifts exist, everything else is closed.
+
+                            if (shifts.length > 0) {
+                                shifts.forEach((shift: any) => {
+                                    if (shift.start_minute > lastEnd) {
+                                        masks.push({
+                                            resourceId: ra.resource_id,
+                                            start: new Date(baseTime.getTime() + lastEnd * 60000),
+                                            end: new Date(baseTime.getTime() + shift.start_minute * 60000),
+                                            type: 'off' as const
+                                        });
+                                    }
+                                    lastEnd = shift.end_minute;
+                                });
+
+                                // Close after last shift
+                                if (lastEnd < 1440) {
+                                    masks.push({
+                                        resourceId: ra.resource_id,
+                                        start: new Date(baseTime.getTime() + lastEnd * 60000),
+                                        end: new Date(baseTime.getTime() + 1440 * 60000),
+                                        type: 'off' as const
+                                    });
+                                }
+                            }
+                            return masks;
+                        }) || []}
+                        setupGaps={(() => {
+                            const gaps: any[] = [];
+                            if (activeConfig?.constraints?.setup_times) {
+                                // We need sorted tasks per machine
+                                const tasksByMachine: Record<string, GanttTask[]> = {};
+                                ganttTasks.forEach(t => {
+                                    if (!tasksByMachine[t.machine]) tasksByMachine[t.machine] = [];
+                                    tasksByMachine[t.machine].push(t);
+                                });
+
+                                Object.keys(tasksByMachine).forEach(m => {
+                                    const mTasks = tasksByMachine[m].sort((a, b) => a.start.getTime() - b.start.getTime());
+                                    for (let i = 0; i < mTasks.length - 1; i++) {
+                                        const t1 = mTasks[i];
+                                        const t2 = mTasks[i + 1];
+                                        const gapMin = (t2.start.getTime() - t1.end.getTime()) / 60000;
+
+                                        if (gapMin > 0) {
+                                            // Check if match
+                                            const rule = activeConfig.constraints.setup_times.find((s: any) =>
+                                                (s.machine === m || s.machine === 'all') &&
+                                                Math.abs(s.duration_minutes - gapMin) < 2 // 2 min tolerance
+                                            );
+                                            if (rule) {
+                                                gaps.push({
+                                                    machine: m,
+                                                    start: t1.end,
+                                                    end: t2.start,
+                                                    label: `${rule.duration_minutes}m`
+                                                });
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            return gaps;
+                        })()}
                     />
                 </div>
             </div>

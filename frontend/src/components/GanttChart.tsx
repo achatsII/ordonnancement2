@@ -20,6 +20,9 @@ interface GanttChartProps {
     viewMode?: 'hour' | 'day' | 'week';
     onTaskMove?: (taskId: string, newStart: Date, newEnd: Date) => void;
     onRequestWhatIf?: () => void;
+    // New Props for Visualization
+    availabilities?: { resourceId: string; start: Date; end: Date; type: 'off' | 'maintenance' }[];
+    setupGaps?: { machine: string; start: Date; end: Date; label?: string }[];
 }
 
 export default function GanttChart({
@@ -29,6 +32,8 @@ export default function GanttChart({
     viewMode = 'day',
     onTaskMove,
     onRequestWhatIf,
+    availabilities = [],
+    setupGaps = []
 }: GanttChartProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     // Drag State
@@ -154,7 +159,7 @@ export default function GanttChart({
     };
 
     const handleTaskDragEnd = () => {
-        setDraggingTask(null);
+        setDragState(null);
     };
 
     // Render Time Header (Numbers)
@@ -321,6 +326,47 @@ export default function GanttChart({
                                                 </div>
                                             );
                                         })}
+
+                                        {/* Setup Gaps (Amber Bridges) */}
+                                        {setupGaps
+                                            .filter(g => g.machine === machine)
+                                            .map((gap, gIdx) => {
+                                                const { left, width } = getTaskPosition({ start: gap.start, end: gap.end } as any);
+                                                return (
+                                                    <div
+                                                        key={`gap-${gIdx}`}
+                                                        className="absolute top-1/2 -translate-y-1/2 h-6 flex items-center justify-center bg-amber-100 border border-amber-300 rounded-md z-0 opacity-80"
+                                                        style={{ left, width: Math.max(width, 2) }}
+                                                        title={`Setup: ${gap.label || 'Configuration'}`}
+                                                    >
+                                                        <div className="w-full h-[1px] bg-amber-400 absolute top-1/2 left-0 right-0"></div>
+                                                        {width > 20 && <span className="text-[9px] text-amber-700 bg-amber-50 px-1 relative z-10 font-mono">SETUP</span>}
+                                                    </div>
+                                                );
+                                            })
+                                        }
+
+                                        {/* Availability Masks (Grey Zones) */}
+                                        {availabilities
+                                            .filter(a => a.resourceId === machine)
+                                            .map((avail, aIdx) => {
+                                                const { left, width } = getTaskPosition({ start: avail.start, end: avail.end } as any);
+                                                return (
+                                                    <div
+                                                        key={`avail-${aIdx}`}
+                                                        className="absolute top-0 bottom-0 bg-slate-100/50 border-x border-slate-200 z-20 pointer-events-none flex items-center justify-center opacity-70"
+                                                        style={{
+                                                            left,
+                                                            width,
+                                                            backgroundImage: "linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 50%, #e2e8f0 50%, #e2e8f0 75%, transparent 75%, transparent)",
+                                                            backgroundSize: "10px 10px"
+                                                        }}
+                                                    >
+                                                        {width > 50 && <span className="text-[10px] text-slate-400 font-bold uppercase -rotate-90">Closed</span>}
+                                                    </div>
+                                                );
+                                            })
+                                        }
                                     </div>
                                 </div>
                             );

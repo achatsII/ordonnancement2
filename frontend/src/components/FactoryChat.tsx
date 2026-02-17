@@ -321,290 +321,252 @@ Tell me about your orders!`;
         }
 
         try {
-            let jsonSchema = undefined;
-            if (currentConv.mode === 'config') {
-                jsonSchema = {
-                    type: "object",
-                    properties: {
-                        assistant_response: { type: "string" },
-                        extracted_config: {
+            // --- UNIFIED EXTRACTION SCHEMA ---
+            const jsonSchema = {
+                type: "object",
+                properties: {
+                    assistant_response: { type: "string", description: "Human-friendly response in the target language" },
+                    extracted_config: {
+                        type: "object",
+                        description: "Extracted factory entities and constraints",
+                        properties: {
+                            machines: { type: "array", items: { type: "object", properties: { name: { type: "string" }, capabilities: { type: "array", items: { type: "string" } } } } },
+                            operators: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        name: { type: "string" },
+                                        skills: { type: "array", items: { type: "string" } },
+                                        processing_times: { type: "object", additionalProperties: { type: "number" } }
+                                    }
+                                }
+                            },
+                            constraints_setup_times: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        machine: { type: "string" },
+                                        duration_minutes: { type: "number" },
+                                        from_product: { type: "string" },
+                                        to_product: { type: "string" }
+                                    }
+                                }
+                            },
+                            resource_availabilities: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        resource_id: { type: "string" },
+                                        shifts: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    start_minute: { type: "number" },
+                                                    end_minute: { type: "number" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            constraints_temporal: { type: "array", items: { type: "object", properties: { type: { type: "string" }, from_operation: { type: "string" }, to_operation: { type: "string" }, duration_minutes: { type: "number" } } } },
+                            constraints_batching: { type: "array", items: { type: "object", properties: { machine: { type: "string" }, min_size: { type: "number" }, max_size: { type: "number" } } } },
+                            constraints_maintenance: { type: "array", items: { type: "object", properties: { machine: { type: "string" }, duration_minutes: { type: "number" }, frequency_hours: { type: "number" } } } }
+                        }
+                    },
+                    extracted_orders: {
+                        type: "array",
+                        items: {
                             type: "object",
-                            description: "Extracted factory entities and constraints",
                             properties: {
-                                machines: { type: "array", items: { type: "object", properties: { name: { type: "string" }, capabilities: { type: "array", items: { type: "string" } } } } },
-                                operators: {
+                                type: { type: "string", enum: ["production", "color_change", "cleaning", "preventive_maintenance", "tool_change", "quality_control"] },
+                                product_name: { type: "string" },
+                                quantity: { type: "number" },
+                                deadline: { type: "string" },
+                                priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+                                client: { type: "string" },
+                                notes: { type: "string" },
+                                color_from: { type: "string" },
+                                color_to: { type: "string" },
+                                machine_id: { type: "string" }
+                            }
+                        }
+                    },
+                    extracted_products: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                name: { type: "string" },
+                                default_operations: {
                                     type: "array",
                                     items: {
                                         type: "object",
                                         properties: {
                                             name: { type: "string" },
-                                            skills: { type: "array", items: { type: "string" } },
-                                            processing_times: { type: "object", additionalProperties: { type: "number" }, description: "Maps skill name to duration in minutes" }
+                                            capability_required: { type: "string" },
+                                            duration_minutes: { type: "number" }
                                         }
                                     }
-                                },
-                                constraints_setup_times: { type: "array", items: { type: "object", properties: { machine: { type: "string" }, duration_minutes: { type: "number" }, from_product: { type: "string" }, to_product: { type: "string" } } } },
-                                constraints_temporal: { type: "array", items: { type: "object", properties: { type: { type: "string" }, from_operation: { type: "string" }, to_operation: { type: "string" }, duration_minutes: { type: "number" } } } },
-                                constraints_batching: { type: "array", items: { type: "object", properties: { machine: { type: "string" }, min_size: { type: "number" }, max_size: { type: "number" } } } },
-                                constraints_maintenance: { type: "array", items: { type: "object", properties: { machine: { type: "string" }, duration_minutes: { type: "number" }, frequency_hours: { type: "number" } } } }
+                                }
                             }
                         }
-                    },
-                    required: ["assistant_response"]
-                };
-            } else if (currentConv.mode === 'orders') {
-                jsonSchema = {
-                    type: "object",
-                    properties: {
-                        assistant_response: { type: "string", description: "Human-friendly response acknowledging the orders" },
-                        extracted_orders: {
-                            type: "array",
-                            description: "Production orders extracted from user message",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    type: { type: "string", enum: ["production", "color_change", "cleaning", "preventive_maintenance", "tool_change", "quality_control"] },
-                                    product_name: { type: "string", description: "Name of the product (for production orders)" },
-                                    quantity: { type: "number", description: "Quantity to produce" },
-                                    deadline: { type: "string", description: "ISO date string for deadline (YYYY-MM-DD)" },
-                                    priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
-                                    client: { type: "string", description: "Client name if mentioned" },
-                                    notes: { type: "string", description: "Any special notes or requirements" },
-                                    color_from: { type: "string", description: "For color_change: starting color" },
-                                    color_to: { type: "string", description: "For color_change: target color" },
-                                    machine_id: { type: "string", description: "For maintenance/cleaning: machine name" }
-                                },
-                                required: ["type"]
-                            }
-                        },
-                        extracted_products: {
-                            type: "array",
-                            description: "New products that need to be created (if mentioned products don't exist)",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: { type: "string" },
-                                    default_operations: {
-                                        type: "array",
-                                        items: {
-                                            type: "object",
-                                            properties: {
-                                                name: { type: "string" },
-                                                capability_required: { type: "string" },
-                                                duration_minutes: { type: "number" }
-                                            }
-                                        }
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        }
-                    },
-                    required: ["assistant_response"]
-                };
-            }
+                    }
+                },
+                required: ["assistant_response"]
+            };
 
-            // --- AI MEMORY INJECTION ---
-            let contextString = undefined;
-            if (currentConv.factoryConfig) {
-                contextString = `Current Factory Config: ${JSON.stringify(currentConv.factoryConfig)}`;
-            }
+            // AI Context
+            let contextString = currentConv.factoryConfig ? `Current Factory Config: ${JSON.stringify(currentConv.factoryConfig)}` : undefined;
             const historyForApi = currentConv.messages;
 
-            // Pass language to AskAI
             const answer = await gateway.askAI(userText, contextString, jsonSchema, historyForApi, language);
-            console.log("askAI PARSED ANSWER:", answer); // DEBUG Log
-
-            // If we got a JSON response (extraction), we might want to ensure the description/text is also in the target language
-            // (The AI prompt injection handles this for the main text part)
 
             let assistantText = "";
-            let newConfig = currentConv.factoryConfig;
-            let updatedPendingOrders = pendingOrders;
-            let updatedPendingProducts = pendingProducts;
+            let newConfig = currentConv.factoryConfig ? JSON.parse(JSON.stringify(currentConv.factoryConfig)) : null;
+            let updatedPendingOrders = [...pendingOrders];
+            let updatedPendingProducts = [...pendingProducts];
 
-            if (typeof answer === 'object' && answer.extracted_config) {
-                console.log("=== CONFIG EXTRACTION FROM AI ===");
-                console.log("Raw extracted_config:", JSON.stringify(answer.extracted_config, null, 2));
+            if (typeof answer === 'object') {
+                assistantText = answer.assistant_response || "";
 
-                assistantText = answer.assistant_response;
-                if (newConfig) {
-                    console.log("Current config before merge:", JSON.stringify(newConfig, null, 2));
+                // --- CONFIG MERGING WITH DE-DUPLICATION ---
+                if (answer.extracted_config && newConfig) {
+                    const ec = answer.extracted_config;
 
-                    if (answer.extracted_config.machines) {
-                        const newMachines = [...newConfig.machines];
-                        answer.extracted_config.machines.forEach((extractedM: any) => {
-                            const existingIdx = newMachines.findIndex(m => m.name.toLowerCase() === extractedM.name.toLowerCase());
-                            if (existingIdx !== -1) {
-                                // Update existing: merge capabilities
-                                const existingCap = new Set(newMachines[existingIdx].capabilities.map(c => c.toLowerCase()));
-                                (extractedM.capabilities || []).forEach((c: string) => existingCap.add(c.toLowerCase()));
-                                newMachines[existingIdx] = {
-                                    ...newMachines[existingIdx],
-                                    capabilities: Array.from(existingCap)
-                                };
+                    // Machines
+                    if (ec.machines) {
+                        ec.machines.forEach((extM: any) => {
+                            const exists = newConfig.machines.find((m: any) => m.name.toLowerCase() === extM.name.toLowerCase());
+                            if (!exists) {
+                                newConfig.machines.push({ ...extM, id: `machine-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` });
                             } else {
-                                // Add new
-                                newMachines.push({
-                                    ...extractedM,
-                                    id: extractedM.id || `machine-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                                    capabilities: extractedM.capabilities || []
-                                });
+                                // Merge capabilities
+                                const newCaps = Array.from(new Set([...exists.capabilities, ...(extM.capabilities || [])]));
+                                exists.capabilities = newCaps;
                             }
                         });
-                        newConfig = { ...newConfig, machines: newMachines };
                     }
-                    if (answer.extracted_config.operators) {
-                        const newOperators = [...newConfig.operators];
-                        answer.extracted_config.operators.forEach((extractedO: any) => {
-                            const existingIdx = newOperators.findIndex(o => o.name.toLowerCase() === extractedO.name.toLowerCase());
-                            if (existingIdx !== -1) {
-                                // Update existing: merge skills and processing_times
-                                const existingSkills = new Set(newOperators[existingIdx].skills.map(s => s.toLowerCase()));
-                                (extractedO.skills || []).forEach((s: string) => existingSkills.add(s.toLowerCase()));
 
-                                newOperators[existingIdx] = {
-                                    ...newOperators[existingIdx],
-                                    skills: Array.from(existingSkills),
-                                    processing_times: {
-                                        ...(newOperators[existingIdx].processing_times || {}),
-                                        ...(extractedO.processing_times || {})
-                                    }
-                                };
+                    // Operators
+                    if (ec.operators) {
+                        ec.operators.forEach((extO: any) => {
+                            const exists = newConfig.operators.find((o: any) => o.name.toLowerCase() === extO.name.toLowerCase());
+                            if (!exists) {
+                                newConfig.operators.push({ ...extO, id: `operator-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` });
                             } else {
-                                // Add new
-                                newOperators.push({
-                                    ...extractedO,
-                                    id: extractedO.id || `operator-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                                    skills: extractedO.skills || [],
-                                    processing_times: extractedO.processing_times || {}
-                                });
+                                const newSkills = Array.from(new Set([...exists.skills, ...(extO.skills || [])]));
+                                exists.skills = newSkills;
+                                exists.processing_times = { ...(exists.processing_times || {}), ...(extO.processing_times || {}) };
                             }
                         });
-                        newConfig = { ...newConfig, operators: newOperators };
                     }
 
-                    // Merge flattened constraints (add IDs to constraints too)
-                    if (answer.extracted_config.constraints_setup_times) {
-                        const withIds = answer.extracted_config.constraints_setup_times.map((c: any, idx: number) => ({
-                            ...c,
-                            id: c.id || `setup-${Date.now()}-${idx}`
-                        }));
-                        console.log("Setup times extracted:", withIds);
-                        newConfig.constraints.setup_times.push(...withIds);
-                    }
-                    if (answer.extracted_config.constraints_temporal) {
-                        const withIds = answer.extracted_config.constraints_temporal.map((c: any, idx: number) => ({
-                            ...c,
-                            id: c.id || `temporal-${Date.now()}-${idx}`
-                        }));
-                        console.log("Temporal constraints extracted:", withIds);
-                        newConfig.constraints.temporal.push(...withIds);
-                    }
-                    if (answer.extracted_config.constraints_batching) {
-                        const withIds = answer.extracted_config.constraints_batching.map((c: any, idx: number) => ({
-                            ...c,
-                            id: c.id || `batching-${Date.now()}-${idx}`
-                        }));
-                        console.log("Batching constraints extracted:", withIds);
-                        newConfig.constraints.batching.push(...withIds);
-                    }
-                    if (answer.extracted_config.constraints_maintenance) {
-                        const withIds = answer.extracted_config.constraints_maintenance.map((c: any, idx: number) => ({
-                            ...c,
-                            id: c.id || `maintenance-${Date.now()}-${idx}`
-                        }));
-                        console.log("Maintenance constraints extracted:", withIds);
-                        newConfig.constraints.maintenance.push(...withIds);
+                    // Setup Times
+                    if (ec.constraints_setup_times) {
+                        ec.constraints_setup_times.forEach((extS: any) => {
+                            const isDup = newConfig.constraints.setup_times.some((s: any) =>
+                                s.machine === extS.machine && s.from_product === extS.from_product && s.to_product === extS.to_product
+                            );
+                            if (!isDup) {
+                                newConfig.constraints.setup_times.push({ ...extS, id: `setup-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` });
+                            }
+                        });
                     }
 
-                    console.log("Config after merge:", JSON.stringify(newConfig, null, 2));
-                }
-            } else if (typeof answer === 'object' && (answer.extracted_orders || answer.extracted_products)) {
-                // ORDERS MODE - Handle extracted orders and products
-                console.log("=== ORDERS EXTRACTION ===");
-                console.log("Raw AI answer:", JSON.stringify(answer, null, 2));
+                    // Batching
+                    if (ec.constraints_batching) {
+                        ec.constraints_batching.forEach((extB: any) => {
+                            const isDup = newConfig.constraints.batching.some((b: any) =>
+                                b.machine === extB.machine && b.min_size === extB.min_size && b.max_size === extB.max_size
+                            );
+                            if (!isDup) {
+                                newConfig.constraints.batching.push({ ...extB, id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` });
+                            }
+                        });
+                    }
 
-                assistantText = answer.assistant_response || "J'ai compris vos commandes.";
+                    // Temporal
+                    if (ec.constraints_temporal) {
+                        ec.constraints_temporal.forEach((extT: any) => {
+                            const isDup = newConfig.constraints.temporal.some((t: any) =>
+                                t.type === extT.type && t.from_operation === extT.from_operation && t.to_operation === extT.to_operation
+                            );
+                            if (!isDup) {
+                                newConfig.constraints.temporal.push({ ...extT, id: `temporal-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` });
+                            }
+                        });
+                    }
 
-                let newProductsList: Job[] = [];
-                let newOrdersList: ProductionOrder[] = [];
-
-                // Process extracted products
-                console.log("extracted_products from AI:", answer.extracted_products);
-                console.log("extracted_orders from AI:", answer.extracted_orders);
-
-                if (answer.extracted_products && answer.extracted_products.length > 0) {
-                    newProductsList = answer.extracted_products.map((p: any) => ({
-                        id: `product-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                        name: p.name,
-                        priority: 'normal' as const,
-                        operations: (p.default_operations || []).map((op: any, idx: number) => ({
-                            id: `op-${Date.now()}-${idx}`,
-                            name: op.name || `Operation ${idx + 1}`,
-                            machine_capability_required: op.capability_required || 'general',
-                            duration_minutes: op.duration_minutes || 15
-                        }))
-                    }));
+                    // Resource Availabilities
+                    if (ec.resource_availabilities) {
+                        if (!newConfig.constraints.resource_availabilities) {
+                            newConfig.constraints.resource_availabilities = [];
+                        }
+                        ec.resource_availabilities.forEach((extA: any) => {
+                            const existingIdx = newConfig.constraints.resource_availabilities.findIndex((a: any) => a.resource_id === extA.resource_id);
+                            if (existingIdx !== -1) {
+                                // Overwrite existing shifts for this resource
+                                newConfig.constraints.resource_availabilities[existingIdx].shifts = extA.shifts || [];
+                            } else {
+                                newConfig.constraints.resource_availabilities.push({ ...extA, id: `avail-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` });
+                            }
+                        });
+                    }
                 }
 
-                // Process extracted orders
-                if (answer.extracted_orders && answer.extracted_orders.length > 0) {
-                    newOrdersList = answer.extracted_orders.map((o: any) => {
-                        const baseOrder: ProductionOrder = {
+                // --- PRODUCTS MERGING ---
+                if (answer.extracted_products) {
+                    answer.extracted_products.forEach((p: any) => {
+                        const exists = updatedPendingProducts.find(prev => prev.name.toLowerCase() === p.name.toLowerCase());
+                        if (!exists) {
+                            updatedPendingProducts.push({
+                                id: `product-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                                name: p.name,
+                                priority: 'normal',
+                                operations: (p.default_operations || []).map((op: any, idx: number) => ({
+                                    id: `op-${Date.now()}-${idx}`,
+                                    name: op.name || `Operation ${idx + 1}`,
+                                    machine_capability_required: op.capability_required || 'general',
+                                    duration_minutes: op.duration_minutes || 15
+                                }))
+                            });
+                        }
+                    });
+                }
+
+                // --- ORDERS MERGING ---
+                if (answer.extracted_orders) {
+                    answer.extracted_orders.forEach((o: any) => {
+                        updatedPendingOrders.push({
                             id: `ord-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                             type: o.type || 'production',
                             priority: o.priority || 'normal',
                             status: 'pending',
                             client: o.client,
                             deadline: o.deadline,
+                            product_name: o.product_name,
+                            quantity: o.quantity || 1,
                             color: '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')
-                        };
-
-                        if (o.type === 'production') {
-                            baseOrder.product_name = o.product_name;
-                            baseOrder.quantity = o.quantity || 1;
-                        } else if (o.type === 'color_change') {
-                            baseOrder.color_change_details = {
-                                from_color: o.color_from || '',
-                                to_color: o.color_to || '',
-                                machine_id: o.machine_id || ''
-                            };
-                        } else if (o.type === 'cleaning' || o.type === 'preventive_maintenance') {
-                            baseOrder.cleaning_details = {
-                                machine_id: o.machine_id || '',
-                                estimated_duration: 30
-                            };
-                        }
-
-                        return baseOrder;
+                        });
                     });
                 }
 
-                // Update local state and store for later persistence
-                updatedPendingProducts = [...pendingProducts, ...newProductsList];
-                updatedPendingOrders = [...pendingOrders, ...newOrdersList];
-
-                console.log("New products extracted:", newProductsList);
-                console.log("New orders extracted:", newOrdersList);
-                console.log("Total pending products:", updatedPendingProducts);
-                console.log("Total pending orders:", updatedPendingOrders);
-
                 setPendingProducts(updatedPendingProducts);
                 setPendingOrders(updatedPendingOrders);
-            } else if (typeof answer === 'string') {
-                assistantText = answer;
-            } else if (typeof answer === 'object' && answer.assistant_response) {
-                assistantText = answer.assistant_response;
             } else {
-                assistantText = JSON.stringify(answer);
+                assistantText = typeof answer === 'string' ? answer : JSON.stringify(answer);
             }
 
             // Fallback if AI returns empty text but valid JSON
-            if (!assistantText && typeof answer === 'object' && answer.extracted_config) {
+            if (!assistantText && typeof answer === 'object' && (answer.extracted_config || answer.extracted_orders)) {
                 assistantText = "Configuration updated based on your request.";
             } else if (!assistantText) {
-                assistantText = "I processed your request but have no specific test to show.";
+                assistantText = language === 'fr' ? "J'ai traité votre demande." : "I processed your request.";
             }
 
             const finalMessages: Message[] = [...newMessages, { role: 'model', parts: [{ text: assistantText }] }];
@@ -614,36 +576,24 @@ Tell me about your orders!`;
                 newTitle = userText.slice(0, 30) + (userText.length > 30 ? '...' : '');
             }
 
-            // Include pending orders/products for orders mode
             const finalConvObj: Conversation = {
                 ...currentConv,
                 messages: finalMessages,
                 title: newTitle,
                 factoryConfig: newConfig,
-                pendingOrders: currentConv.mode === 'orders' ? updatedPendingOrders : undefined,
-                pendingProducts: currentConv.mode === 'orders' ? updatedPendingProducts : undefined,
+                pendingOrders: updatedPendingOrders,
+                pendingProducts: updatedPendingProducts,
                 updatedAt: new Date().toISOString()
             };
 
-            console.log("=== SAVING CONVERSATION ===");
-            console.log("Conversation ID:", currentId);
-            console.log("Mode:", currentConv.mode);
-            console.log("Factory config in conversation:", JSON.stringify(finalConvObj.factoryConfig, null, 2));
-            if (currentConv.mode === 'orders') {
-                console.log("Pending orders:", updatedPendingOrders.length);
-                console.log("Pending products:", updatedPendingProducts.length);
-            }
-
-            // Save AI response to database FIRST (important if user navigates away)
+            // Save to DB
             try {
-                const saveResult = await gateway.updateData('conversations', currentId, finalConvObj);
-                console.log("Conversation save result:", saveResult);
-                console.log("=== CONVERSATION SAVED ===");
+                await gateway.updateData('conversations', currentId, finalConvObj);
             } catch (saveError) {
-                console.error("=== CONVERSATION SAVE ERROR ===", saveError);
+                console.error("Failed to save final conversation state", saveError);
             }
 
-            // Then update local state (won't work if component unmounted, but that's ok)
+            // Update local state
             setConversations(prev => prev.map(c => c._id === currentId ? finalConvObj : c));
 
         } catch (e) {

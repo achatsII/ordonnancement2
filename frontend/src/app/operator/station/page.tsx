@@ -2,49 +2,39 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { solver, SolvedTaskResult } from '@/services/solver';
-import { MOCK_SOLVER_DATA } from '@/lib/mockData';
+import { SolvedTaskResult, Operator } from '@/types/factory';
 import { Play, CheckCircle, Clock, AlertTriangle, Loader2, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useProductionState } from '@/contexts/ProductionStateContext';
 
 function StationContent() {
     const searchParams = useSearchParams();
     const opId = searchParams.get('op');
-    // Find operator name from mock data
-    const operator = MOCK_SOLVER_DATA.operators.find(o => o.id === opId);
+    const { state: { activeConfig, activeSchedule, isLoading: contextLoading } } = useProductionState();
+
+    // Find operator from active config
+    const operator = activeConfig?.operators.find((o: Operator) => o.id === opId);
 
     const [tasks, setTasks] = useState<SolvedTaskResult[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTask, setActiveTask] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!opId) return;
+        if (!operator || !activeSchedule) {
+            setTasks([]);
+            setLoading(false);
+            return;
+        }
 
-        const loadSchedule = async () => {
-            // Simulate "Get Active Schedule"
-            // In real app, this would fetch from DB "ScheduledTasks" table
-            try {
-                const res = await solver.solve(MOCK_SOLVER_DATA);
-                if (res.status === 'success' && res.tasks) {
-                    // Filter tasks for this operator
-                    // Note: The solver returns operator NAME, let's match by name for this prototype since I didn't verify ID flow in solver backend perfectly yet
-                    // or the operator might need to be assigned strictly.
-                    // The mock data operators have Names like "Alice". The solver returns "Alice".
-                    const myTasks = res.tasks.filter(t => t.operatorName === operator?.name);
+        // Filter tasks for this operator from the active schedule
+        const myTasks = activeSchedule.tasks?.filter((t: SolvedTaskResult) =>
+            t.operatorName === operator.name
+        ) || [];
 
-                    // Sort by start time
-                    myTasks.sort((a, b) => a.start - b.start);
-                    setTasks(myTasks);
-                }
-            } catch (e) {
-                console.error(e);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        loadSchedule();
-    }, [opId, operator]);
+        myTasks.sort((a: SolvedTaskResult, b: SolvedTaskResult) => a.start - b.start);
+        setTasks(myTasks);
+        setLoading(false);
+    }, [operator, activeSchedule]);
 
     if (!operator) {
         return <div className="text-white">Operator not found.</div>;

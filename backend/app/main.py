@@ -34,67 +34,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class Task(BaseModel):
-    id: str
-    name: str
-    eligibleLines: List[str]
-    duration: int
-    skill: str
-    order: Optional[int] = 0
-    manualStart: Optional[int] = None # New: Field to store user override
-
-class Job(BaseModel):
-    id: str
-    name: str
-    tasks: List[Task]
-    color: str
-    priority: int
-    dueDate: int
-
-class Operator(BaseModel):
-    id: str
-    name: str
-    skills: List[str]
-
-class Line(BaseModel):
-    id: str
-    name: str
-
-class SolveRequest(BaseModel):
-    jobs: List[Job]
-    lines: List[Line]
-    operators: List[Operator]
-
-# ===== WHAT-IF MODELS =====
-
-class WhatIfModification(BaseModel):
-    type: str  # 'delay_order', 'machine_down', 'operator_unavailable', 'task_move', 'custom'
-    description: str
-    parameters: Dict
-
-class WhatIfScenario(BaseModel):
-    id: str
-    name: str
-    description: str
-    baseScheduleId: str
-    modifications: List[WhatIfModification]
-
-class WhatIfSimulateRequest(BaseModel):
-    scenario: WhatIfScenario
-    currentSolveRequest: SolveRequest  # Base schedule configuration
-    currentTasks: List[Dict]  # Current schedule tasks (for comparison)
-
-class JobImpact(BaseModel):
-    jobId: str
-    jobName: str
-    endTimeBefore: str
-    endTimeAfter: str
-    deltaHours: float
-    status: str  # 'improved', 'degraded', 'neutral'
-
-class ImpactAnalysis(BaseModel):
-    jobImpacts: List[JobImpact]
-    globalMetrics: Dict
+from .models import (
+    Task, Job, Operator, Line, SetupTime, AvailabilityInterval, 
+    ResourceAvailability, SolveRequest, WhatIfModification, 
+    WhatIfScenario, WhatIfSimulateRequest, JobImpact, ImpactAnalysis
+)
 
 @app.post("/solve")
 async def solve_production(req: SolveRequest):
@@ -132,65 +76,124 @@ async def solve_production(req: SolveRequest):
             job_starts[job_idx, t_idx] = start_var
             job_ends[job_idx, t_idx] = end_var
             
-            # Choice of machine
+            # --- MACHINE ASSIGNMENT ---
             machine_options = []
             for line_id in task.eligibleLines:
                 alt_suffix = f"{suffix}_{line_id}"
-                l_presence = model.new_bool_var(f"presence{alt_suffix}")
-                l_start = model.new_int_var(0, horizon, f"start{alt_suffix}")
-                l_end = model.new_int_var(0, horizon, f"end{alt_suffix}")
-                l_interval = model.new_optional_interval_var(l_start, task.duration, l_end, l_presence, f"interval{alt_suffix}")
-                
-                # Link local variables to global task variables if present
-                model.add(l_start == start_var).only_enforce_if(l_presence)
-                model.add(l_end == end_var).only_enforce_if(l_presence)
+                l_presence = model.new_bool_var(f"presence_line{alt_suffix}")
+                l_interval = model.new_optional_interval_var(start_var, task.duration, end_var, l_presence, f"interval_line{alt_suffix}")
                 
                 machine_options.append((line_id, l_presence))
-                line_to_intervals[line_id].append(l_interval)
-                
-                # Operator constraint
-                # Find valid operators for this task's skill
-                # NOTE: This logic assumes 1 operator per task, and picks ONE from the list of valid ones?
-                # Actually, the user code tries to find ONE assigned_op. 
-                # Ideally, we should allow ANY operator with the skill.
-                # Let's adapt to be more flexible: Create an interval for EACH capable operator and select ONE.
-                
-                # However, following the user's snippet strictness:
-                # "assigned_op = next((op for op in req.operators if task.skill in op.skills), None)"
-                # This seems to pick the STARTING operator found. This might be a bug in the snippet or a simplification.
-                # If multiple operators have the skill, we should probably allow the solver to pick amongst them.
-                # ADAPTATION: Allow solver to choose Operator.
-                
-                capable_ops = [op for op in req.operators if task.skill in op.skills]
-                if capable_ops:
-                    # We need to choose ONE operator for this specific machine assignment? 
-                    # OR is the operator assigned regardless of machine?
-                    # Usually Operator is independent resource.
-                    # Let's stick to the prompt's logic but maybe fix the 'first found' issue if possible.
-                    # The prompt's logic: "assigned_op = next(...)". This forces the task to the FIRST operator found.
-                    # This effectively statically assigns the operator. 
-                    # I will keep it as is to respect the prompt, but maybe add a comment.
-                    # Actually, for "Scheduling", dynamic operator assignment is better. 
-                    # But let's simplify: if simple snippet, maybe static is intended.
-                    # Re-reading: "assigned_op = next(...)"
-                    # I'll stick to the snippet for now.
-                    
-                    assigned_op = capable_ops[0] # Simply take the first capable one for now per the snippet logic
-                    operator_to_intervals[assigned_op.id].append(l_interval)
+                line_to_intervals[line_id].append({
+                    'interval': l_interval,
+                    'presence': l_presence,
+                    'job_id': job.id,
+                    'start': start_var,
+                    'end': end_var
+                })
 
-            # Exactly one machine must be selected
             if machine_options:
                 model.add_exactly_one([opt[1] for opt in machine_options])
             
-            task_info[job_idx, t_idx] = machine_options
+            # --- OPERATOR ASSIGNMENT ---
+            capable_ops = [op for op in req.operators if task.skill in op.skills]
+            op_options = []
+            for op in capable_ops:
+                alt_op_suffix = f"{suffix}_{op.id}"
+                op_presence = model.new_bool_var(f"presence_op{alt_op_suffix}")
+                op_interval = model.new_optional_interval_var(start_var, task.duration, end_var, op_presence, f"interval_op{alt_op_suffix}")
+                
+                op_options.append((op.id, op_presence))
+                operator_to_intervals[op.id].append(op_interval)
+            
+            if op_options:
+                model.add_exactly_one([opt[1] for opt in op_options])
+            
+            task_info[job_idx, t_idx] = {
+                'lines': machine_options,
+                'operators': op_options
+            }
 
-    # Constraint: No overlap on lines
-    for line_id, intervals in line_to_intervals.items():
-        model.add_no_overlap(intervals)
+    # --- SHIFTS / AVAILABILITIES (FORBIDDEN INTERVALS) ---
+    def apply_availability(resource_id, all_intervals, availabilities):
+        # Find if this resource has specific availability
+        res_avail = next((a for a in availabilities if a.resourceId == resource_id), None)
+        if not res_avail:
+            return
         
-    # Constraint: No overlap for operators
+        # Create forbidden intervals (gaps where the resource is NOT available)
+        # Assuming horizon is the max time
+        forbidden = []
+        last_end = 0
+        sorted_intervals = sorted(res_avail.intervals, key=lambda x: x.start)
+        
+        for interval in sorted_intervals:
+            if interval.start > last_end:
+                # Gap between last end and current start
+                forbidden.append(model.new_interval_var(last_end, interval.start - last_end, interval.start, f"gap_{resource_id}_{last_end}"))
+            last_end = interval.end
+        
+        if last_end < horizon:
+            forbidden.append(model.new_interval_var(last_end, horizon - last_end, horizon, f"gap_{resource_id}_{last_end}"))
+        
+        # Add no overlap between task intervals and forbidden gaps
+        model.add_no_overlap(all_intervals + forbidden)
+
+    # Constraint: No overlap on lines (including shifts and setup times)
+    for line_id, data_list in line_to_intervals.items():
+        intervals = [d['interval'] for d in data_list]
+        
+        # Apply shifts if any
+        if req.availabilities:
+            apply_availability(line_id, intervals, req.availabilities)
+        else:
+            model.add_no_overlap(intervals)
+            
+        # Apply setup times if any
+        if req.setupTimes:
+            line_setups = [s for s in req.setupTimes if s.lineId == line_id]
+            if line_setups:
+                num_tasks = len(data_list)
+                nodes = range(num_tasks + 1)
+                depot = num_tasks
+                arcs = []
+                for i in range(num_tasks):
+                    presence_i = data_list[i]['presence']
+                    
+                    # Depot -> i
+                    lit_start = model.new_bool_var(f"arc_depot_{i}_{line_id}")
+                    # Depot outgoing arcs sum to 1 (AddCircuit handles this if we include depot)
+                    arcs.append((depot, i, lit_start))
+                    
+                    # i -> Depot
+                    lit_end = model.new_bool_var(f"arc_{i}_depot_{line_id}")
+                    arcs.append((i, depot, lit_end))
+                    
+                    # i -> i (if not present)
+                    lit_self = model.new_bool_var(f"arc_{i}_{i}_{line_id}")
+                    model.add(lit_self == presence_i.Not())
+                    arcs.append((i, i, lit_self))
+                    
+                    for j in range(num_tasks):
+                        if i == j: continue
+                        lit_ij = model.new_bool_var(f"arc_{i}_{j}_{line_id}")
+                        arcs.append((i, j, lit_ij))
+                        
+                        # Find setup time
+                        setup = next((s for s in line_setups if s.fromJobId == data_list[i]['job_id'] and s.toJobId == data_list[j]['job_id']), None)
+                        if setup:
+                            model.add(data_list[i]['end'] + setup.duration <= data_list[j]['start']).only_enforce_if(lit_ij)
+                
+                # Depot loop (optional if no tasks assigned)
+                # Not needed if depot is just a routing point
+                model.add_circuit(arcs)
+
+    # Constraint: No overlap for operators (including shifts)
     for op_id, intervals in operator_to_intervals.items():
-        model.add_no_overlap(intervals)
+        if req.availabilities:
+            apply_availability(op_id, intervals, req.availabilities)
+        else:
+            model.add_no_overlap(intervals)
 
     # Constraint: Precedence in jobs (Strict sequence)
     for job_idx, job in enumerate(req.jobs):
@@ -251,36 +254,39 @@ async def solve_production(req: SolveRequest):
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         results = []
         for job_idx, job in enumerate(req.jobs):
+            res_job = {"id": job.id, "name": job.name, "tasks": [], "color": job.color}
             for t_idx, task in enumerate(job.tasks):
-                # Find chosen line
-                chosen_line = "N/A"
-                if (job_idx, t_idx) in task_info:
-                    for line_id, presence in task_info[job_idx, t_idx]:
-                        if solver.value(presence):
-                            chosen_line = line_id
-                            break
+                start_val = solver.value(job_starts[job_idx, t_idx])
+                end_val = solver.value(job_ends[job_idx, t_idx])
                 
-                # Check operator (using the same static logic as above)
-                op_name = "N/A"
-                capable_ops = [op for op in req.operators if task.skill in op.skills]
-                if capable_ops:
-                     op_name = capable_ops[0].name
-
-                results.append({
+                info = task_info[job_idx, t_idx]
+                
+                line_id = "Unknown"
+                for l_id, l_presence in info['lines']:
+                    if solver.boolean_value(l_presence):
+                        line_id = l_id
+                        break
+                
+                op_id = "None"
+                for o_id, o_presence in info['operators']:
+                    if solver.boolean_value(o_presence):
+                        op_id = o_id
+                        break
+                
+                res_job["tasks"].append({
                     "id": task.id,
-                    "jobId": job.id,
-                    "jobName": job.name,
                     "name": task.name,
-                    "line": chosen_line,
-                    "start": solver.value(job_starts[job_idx, t_idx]),
-                    "end": solver.value(job_ends[job_idx, t_idx]),
+                    "start": start_val,
+                    "end": end_val,
                     "duration": task.duration,
                     "color": job.color,
-                    "operatorName": op_name,
+                    "line": line_id,
+                    "operator": op_id,
                     "priority": job.priority,
                     "dueDate": job.dueDate,
                     "manualStart": task.manualStart
                 })
+            results.append(res_job)
         
         return {
             "status": "success",
