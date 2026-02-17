@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useProductionState } from '@/contexts/ProductionStateContext';
 import { gateway } from '@/services/gateway';
 import GanttChart, { GanttTask } from '@/components/GanttChart';
@@ -9,8 +9,7 @@ import WhatIfBanner from '@/components/WhatIfBanner';
 import WhatIfImpactModal from '@/components/WhatIfImpactModal';
 // OrderManager imported removed
 import { WhatIfScenario, ImpactAnalysis, WhatIfModification } from '@/types/whatif';
-import { ProductionOrder } from '@/types/factory';
-import { Loader2, RefreshCw, Play, Wand2, Package, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, RefreshCw, Play, Wand2, Package, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 
@@ -36,8 +35,7 @@ export default function SchedulePage() {
         state: { activeConfig, activeSchedule, activeOrders, isLoading },
         updateSchedule,
         promoteWhatIfToProduction,
-        addWhatIfScenario,
-        reload
+        addWhatIfScenario
     } = useProductionState();
 
     // Local UI State
@@ -58,6 +56,13 @@ export default function SchedulePage() {
     // Removed auto-compute to prevent state issues
     // User should manually click "Re-Optimize" button
 
+    // Helper for shift start (8:00 AM today)
+    const getShiftStart = () => {
+        const d = new Date();
+        d.setHours(8, 0, 0, 0);
+        return d;
+    };
+
     const handleOptimizeInSimulation = async () => {
         if (!activeConfig) {
             toast.error('No configuration loaded');
@@ -70,13 +75,13 @@ export default function SchedulePage() {
         }
 
         setIsComputing(true);
-        // Automatically switch to What-If mode if not already
-        setIsWhatIfMode(true);
+        // We will update production directly, so ensure we exit simulation mode if active
+        setIsWhatIfMode(false);
 
         try {
-            console.log("=== COMPUTE OPTIMIZATION SIMULATION START ===");
+            console.log("=== COMPUTE OPTIMIZATION START ===");
 
-            // 1. Prepare Data (Same logic as before)
+            // 1. Prepare Data
             const jobs: any[] = [];
             for (const order of activeOrders) {
                 if (order.type === 'production' && order.product_id) {
@@ -86,12 +91,22 @@ export default function SchedulePage() {
                     if (!productTemplate) continue;
                     const priorityMap: Record<string, number> = { 'low': 1, 'normal': 2, 'high': 3, 'urgent': 4 };
 
+                    // Use shift start as relative 0 for due date calculation
+                    const shiftStartEpoch = getShiftStart().getTime() / 1000;
+                    const deadlineEpoch = order.deadline ? new Date(order.deadline).getTime() / 1000 : shiftStartEpoch + 86400; // Default +24h
+
+                    // Convert absolute deadline timestamp to relative minutes for solver? 
+                    // No, Backend Job model expects INT due date.
+                    // Solver logic: tardiness >= finish_time - job.dueDate
+                    // finish_time is in minutes from 0. So dueDate MUST indicate minutes from 0.
+                    const dueMinutes = Math.floor((deadlineEpoch - shiftStartEpoch) / 60);
+
                     jobs.push({
                         id: order.id,
                         name: `${order.product_name || productTemplate.name} (Qty: ${order.quantity || 1})`,
                         priority: priorityMap[order.priority] || 2,
                         color: getColorForJob(jobs.length),
-                        dueDate: order.deadline ? new Date(order.deadline).getTime() / 1000 : Date.now() / 1000 + 86400,
+                        dueDate: dueMinutes > 0 ? dueMinutes : null, // Fix incorrect large timestamp
                         tasks: productTemplate.operations.map((op: any, idx: number) => {
                             let eligibleMachines = activeConfig.machines
                                 .filter((m: any) => m.capabilities?.includes(op.machine_capability_required))
@@ -101,14 +116,13 @@ export default function SchedulePage() {
                                 id: `${order.id}-task-${idx}`,
                                 name: op.name,
                                 eligibleLines: eligibleMachines,
-                                duration: op.duration_minutes,
+                                duration: Math.ceil(op.duration_minutes),
                                 skill: op.machine_capability_required || 'general',
                                 order: idx
                             };
                         })
                     });
                 }
-                // Add color_change and cleaning logic here if needed (omitted for brevity, assume critical production path)
             }
 
             if (jobs.length === 0) {
@@ -127,7 +141,7 @@ export default function SchedulePage() {
                     lineId: s.machine,
                     fromJobId: s.from_product,
                     toJobId: s.to_product,
-                    duration: s.duration_minutes
+                    duration: Math.ceil(s.duration_minutes)
                 })),
                 availabilities: activeConfig.constraints.resource_availabilities?.map((a: any) => ({
                     resourceId: a.resource_id,
@@ -138,30 +152,33 @@ export default function SchedulePage() {
             console.log("Optimization Result:", result);
 
             if (result.status === 'success') {
-                const newSimulatedSchedule = {
+                // Flatten: backend returns jobs[].tasks[], Gantt expects a flat task array
+                const flatTasks = (result.tasks || []).flatMap((job: any) =>
+                    (job.tasks || []).map((t: any) => ({
+                        ...t,
+                        jobName: job.name,
+                        color: t.color || job.color
+                    }))
+                );
+
+                const newProductionSchedule = {
                     ...result,
-                    tasks: result.tasks || [],
+                    id: 'prod-' + Date.now(), // Generate ID
+                    tasks: flatTasks,
                     makespan: result.makespan || 0,
                     logs: result.logs || [],
                     updatedAt: new Date().toISOString()
                 };
 
-                setSimulatedSchedule(newSimulatedSchedule);
+                // DIRECT UPDATE TO PRODUCTION
+                updateSchedule(newProductionSchedule);
+                toast.success('Production schedule optimized successfully');
 
-                // 3. Create a transient Scenario
-                const optimizationScenario: WhatIfScenario = {
-                    id: `scenario-opt-${Date.now()}`,
-                    name: 'Full AI Re-Optimization',
-                    description: 'Global re-optimization of all tasks based on current orders.',
-                    baseScheduleId: (activeSchedule as any)?.id || 'current',
-                    modifications: [],
-                    simulatedSchedule: newSimulatedSchedule,
-                    createdAt: new Date().toISOString(),
-                    status: 'simulated'
-                };
+                // Clear any simulation state
+                setSimulatedSchedule(null);
+                setCurrentScenario(null);
+                setImpactAnalysis(null);
 
-                setCurrentScenario(optimizationScenario);
-                toast.success('Optimization proposal generated in Simulation Mode');
             } else {
                 toast.error('Optimization failed');
             }
@@ -175,9 +192,17 @@ export default function SchedulePage() {
 
     // Handle Task Drag & Drop (What-If Trigger)
     const handleTaskMove = async (taskId: string, newStart: Date, newEnd: Date) => {
-        if (!isWhatIfMode) return;
-
+        // Automatically enter What-If mode on drag interaction
+        setIsWhatIfMode(true);
         setIsSimulating(true);
+
+        // Helper for shift start used in calculation (8:00 AM)
+        const shiftStart = getShiftStart();
+        // Calculate relative minutes from shift start
+        const relativeMinutes = Math.floor((newStart.getTime() - shiftStart.getTime()) / 60000);
+
+        console.log(`Moving task ${taskId} to ${newStart.toLocaleTimeString()} (${relativeMinutes}m relative)`);
+
         try {
             // 1. Create or Update Scenario
             const modification: WhatIfModification = {
@@ -185,7 +210,7 @@ export default function SchedulePage() {
                 description: `Moved task ${taskId} to ${newStart.toLocaleTimeString()}`,
                 parameters: {
                     taskId,
-                    newStartTime: Math.floor(newStart.getTime() / (1000 * 60)).toString() // minutes
+                    newStartTime: relativeMinutes.toString() // Corrected to relative minutes
                 }
             };
 
@@ -205,11 +230,10 @@ export default function SchedulePage() {
             setCurrentScenario(updatedScenario);
 
             // 2. Prepare Simulation Request
-            // RE-CONSTRUCT JOBS from activeOrders (duplication of logic from handleComputeSchedule)
-            // Ideally should be refactored into a helper function, but for now we fix inline.
+            // RE-CONSTRUCT JOBS from activeOrders (Same logic as above, ideally shared)
             const jobs: any[] = [];
+            const shiftStartEpoch = getShiftStart().getTime() / 1000;
 
-            // NOTE: This logic must match handleComputeSchedule transformation!
             if (activeConfig && activeOrders.length > 0) {
                 for (const order of activeOrders) {
                     if (order.type === 'production' && order.product_id) {
@@ -219,12 +243,16 @@ export default function SchedulePage() {
                         if (!productTemplate) continue;
 
                         const priorityMap: Record<string, number> = { 'low': 1, 'normal': 2, 'high': 3, 'urgent': 4 };
+                        // Consistent due date relative minute calculation
+                        const deadlineEpoch = order.deadline ? new Date(order.deadline).getTime() / 1000 : shiftStartEpoch + 86400;
+                        const dueMinutes = Math.floor((deadlineEpoch - shiftStartEpoch) / 60);
+
                         jobs.push({
                             id: order.id,
                             name: `${order.product_name || productTemplate.name} (Qty: ${order.quantity || 1})`,
                             priority: priorityMap[order.priority] || 2,
-                            color: order.color || '#3B82F6',
-                            dueDate: order.deadline ? new Date(order.deadline).getTime() / 1000 : Date.now() / 1000 + 86400,
+                            color: order.color || getColorForJob(jobs.length),
+                            dueDate: dueMinutes > 0 ? dueMinutes : null,
                             tasks: productTemplate.operations.map((op: any, idx: number) => {
                                 let eligibleMachines = activeConfig.machines
                                     .filter((m: any) => m.capabilities?.includes(op.machine_capability_required))
@@ -235,14 +263,13 @@ export default function SchedulePage() {
                                     id: `${order.id}-task-${idx}`,
                                     name: op.name,
                                     eligibleLines: eligibleMachines,
-                                    duration: op.duration_minutes,
+                                    duration: Math.ceil(op.duration_minutes),
                                     skill: op.machine_capability_required || 'general',
                                     order: idx
                                 };
                             })
                         });
                     }
-                    // Add other types if needed (color_change, etc.) - kept simple for critical fix
                 }
             }
 
@@ -257,7 +284,7 @@ export default function SchedulePage() {
                     lineId: s.machine,
                     fromJobId: s.from_product,
                     toJobId: s.to_product,
-                    duration: s.duration_minutes
+                    duration: Math.ceil(s.duration_minutes)
                 })),
                 availabilities: activeConfig.constraints.resource_availabilities?.map((a: any) => ({
                     resourceId: a.resource_id,
@@ -273,13 +300,27 @@ export default function SchedulePage() {
             );
 
             if (result.status === 'success') {
-                setSimulatedSchedule(result.simulatedSchedule);
+                // FLATTEN TASKS HERE TOO for Simulation Result
+                const flatTasks = (result.tasks || []).flatMap((job: any) =>
+                    (job.tasks || []).map((t: any) => ({
+                        ...t,
+                        jobName: job.name,
+                        color: t.color || job.color
+                    }))
+                );
+
+                const simScheduleWithFlatTasks = {
+                    ...result.simulatedSchedule,
+                    tasks: flatTasks // Overwrite with flattened tasks
+                };
+
+                setSimulatedSchedule(simScheduleWithFlatTasks);
                 setImpactAnalysis(result.impactAnalysis);
 
                 // Update local scenario with result
                 setCurrentScenario({
                     ...updatedScenario,
-                    simulatedSchedule: result.simulatedSchedule,
+                    simulatedSchedule: simScheduleWithFlatTasks,
                     impactAnalysis: result.impactAnalysis,
                     status: 'simulated'
                 });
@@ -292,6 +333,7 @@ export default function SchedulePage() {
         } catch (err) {
             console.error("Simulation error", err);
             toast.error("Failed to run simulation");
+            // Revert state if needed, here just logging
         } finally {
             setIsSimulating(false);
         }
@@ -483,7 +525,7 @@ export default function SchedulePage() {
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl font-medium shadow-lg shadow-indigo-200 disabled:opacity-50"
                     >
                         {isComputing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
-                        Re-Optimize
+                        {activeSchedule ? "Re-Optimize" : "Optimize"}
                     </button>
                 </div>
             </div>

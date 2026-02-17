@@ -5,7 +5,7 @@ class Task(BaseModel):
     id: str
     name: str
     eligibleLines: List[str]
-    duration: int
+    duration: float
     skill: str
     order: Optional[int] = 0
     manualStart: Optional[int] = None
@@ -16,7 +16,7 @@ class Job(BaseModel):
     tasks: List[Task]
     color: str
     priority: int
-    dueDate: int
+    dueDate: Optional[int] = None
 
 class Operator(BaseModel):
     id: str

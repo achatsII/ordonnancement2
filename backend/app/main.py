@@ -7,6 +7,7 @@ import collections
 from ortools.sat.python import cp_model
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import math
 
 app = FastAPI()
 
@@ -52,7 +53,7 @@ async def solve_production(req: SolveRequest):
     
     # Pre-computation (Heuristic Horizon)
     # Sum of all durations + buffer. In production, might want 'Start of earliest job + sum of durations'
-    horizon = sum(t.duration for j in req.jobs for t in j.tasks) + 1000 
+    horizon = int(sum(t.duration for j in req.jobs for t in j.tasks) + 1000)
     
     task_info = collections.defaultdict(list) # (job_id, task_idx) -> list of machine options
     job_starts = {} # (job_id, task_idx) -> start_var
@@ -81,7 +82,7 @@ async def solve_production(req: SolveRequest):
             for line_id in task.eligibleLines:
                 alt_suffix = f"{suffix}_{line_id}"
                 l_presence = model.new_bool_var(f"presence_line{alt_suffix}")
-                l_interval = model.new_optional_interval_var(start_var, task.duration, end_var, l_presence, f"interval_line{alt_suffix}")
+                l_interval = model.new_optional_interval_var(start_var, int(math.ceil(task.duration)), end_var, l_presence, f"interval_line{alt_suffix}")
                 
                 machine_options.append((line_id, l_presence))
                 line_to_intervals[line_id].append({
@@ -101,7 +102,7 @@ async def solve_production(req: SolveRequest):
             for op in capable_ops:
                 alt_op_suffix = f"{suffix}_{op.id}"
                 op_presence = model.new_bool_var(f"presence_op{alt_op_suffix}")
-                op_interval = model.new_optional_interval_var(start_var, task.duration, end_var, op_presence, f"interval_op{alt_op_suffix}")
+                op_interval = model.new_optional_interval_var(start_var, int(math.ceil(task.duration)), end_var, op_presence, f"interval_op{alt_op_suffix}")
                 
                 op_options.append((op.id, op_presence))
                 operator_to_intervals[op.id].append(op_interval)
@@ -217,6 +218,7 @@ async def solve_production(req: SolveRequest):
     
     for job_idx, job in enumerate(req.jobs):
         if not job.tasks: continue
+        if job.dueDate is None: continue  # No deadline = no tardiness penalty
         finish_time = job_ends[job_idx, len(job.tasks) - 1]
         tardiness = model.new_int_var(0, horizon, f"tardiness_j{job_idx}")
         

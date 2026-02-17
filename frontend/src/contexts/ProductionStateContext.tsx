@@ -70,24 +70,13 @@ export function ProductionStateProvider({ children }: { children: ReactNode }) {
 
             // Load orders
             console.log("Loading orders...");
-            const ordersRes = await gateway.getAllData('production_orders');
-            console.log("Orders response:", ordersRes);
-
-            let orders: ProductionOrder[] = [];
-            if (ordersRes.results && ordersRes.results.length > 0) {
-                const latest = ordersRes.results.sort((a: any, b: any) =>
-                    new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-                )[0];
-                orders = latest.json_data?.orders || [];
-                console.log("Loaded orders:", orders.length);
-            } else {
-                console.log("No orders found");
-            }
+            const loadedOrders = await gateway.loadOrders();
+            console.log("Orders loaded:", loadedOrders.length);
 
             setState({
                 activeConfig: config,
                 activeSchedule: scheduleData,
-                activeOrders: orders,
+                activeOrders: loadedOrders,
                 whatifScenarios: [], // TODO: Load from backend if persisted
                 isLoading: false,
             });

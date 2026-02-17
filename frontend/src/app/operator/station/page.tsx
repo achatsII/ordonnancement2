@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useState, Suspense, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SolvedTaskResult, Operator } from '@/types/factory';
 import { Play, CheckCircle, Clock, AlertTriangle, Loader2, ArrowRight } from 'lucide-react';
@@ -15,26 +15,18 @@ function StationContent() {
     // Find operator from active config
     const operator = activeConfig?.operators.find((o: Operator) => o.id === opId);
 
-    const [tasks, setTasks] = useState<SolvedTaskResult[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [activeTask, setActiveTask] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!operator || !activeSchedule) {
-            setTasks([]);
-            setLoading(false);
-            return;
-        }
-
-        // Filter tasks for this operator from the active schedule
+    // Derived state for tasks
+    const tasks = useMemo(() => {
+        if (!operator || !activeSchedule) return [];
         const myTasks = activeSchedule.tasks?.filter((t: SolvedTaskResult) =>
             t.operatorName === operator.name
         ) || [];
-
-        myTasks.sort((a: SolvedTaskResult, b: SolvedTaskResult) => a.start - b.start);
-        setTasks(myTasks);
-        setLoading(false);
+        return myTasks.sort((a: SolvedTaskResult, b: SolvedTaskResult) => a.start - b.start);
     }, [operator, activeSchedule]);
+
+    // Derived loading state
+    const loading = contextLoading;
+    const [activeTask, setActiveTask] = useState<string | null>(null);
 
     if (!operator) {
         return <div className="text-white">Operator not found.</div>;
@@ -73,7 +65,6 @@ function StationContent() {
                     {tasks.map((task, idx) => {
                         const isNext = idx === 0 && !activeTask;
                         const isActive = activeTask === task.id;
-                        const isFuture = !isActive && !isNext;
 
                         return (
                             <div

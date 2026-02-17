@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { ProductionOrder, ScheduleResult, Conversation, Message } from '@/types/factory';
+import { WhatIfScenario } from '@/types/whatif';
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://qa.gateway.intelligenceindustrielle.com';
 const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InZUZHJUTTNzQmRRcmtmb0oifQ.eyJpc3MiOiJodHRwczovL3BiY3Vzam5reGJ5aWtyZ293YXRjLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI3NmYxYjY5Yy05YmQyLTRjY2UtOTlhNC1kMGNkOTdjNTk5MzkiLCJhdWQiOiJ2MCIsImlhdCI6MTc2Mjk4MzgxMiwiZXhwIjoyMDc4NTUzMzMyLCJlbWFpbCI6InYwQGV4YW1wbGUuY29tIiwiZ3JhbnRfaWQiOiJhZTFiYTkzMC1jNDQyLTQwNTMtYjhhOC04MzZlZDM0MGEzYzgiLCJvcmdhbml6YXRpb24iOnsiaWQiOiJjMjE3OWJiNC03OGQyLTRmZWMtYjU0Zi01YTE4MDg3MDY0NjUiLCJuYW1lIjoiRMOpdmVsb3BwZXVyIHYwIiwicm9sZSI6InVzZXIifSwiYXBwbGljYXRpb24iOnsiaWQiOiIyNGE1MWQxYi04MzkyLTQzN2UtODE3MS0zZWU3MDJhOTJjNzciLCJuYW1lIjoiUHJvamV0IHYwIiwiaWRlbnRpZmllciI6InYwIn0sInJvbGUiOiJ1c2VyIiwic2NvcGVzIjpbIioiXSwibWV0YWRhdGEiOnt9fQ.V5zrL3u2z6HGhMkzBCjlozc-CEtYQicPwGbBkCEfaFs';
@@ -19,7 +21,7 @@ export const gateway = {
     },
 
     // Data (CRUD)
-    saveData: async (dataType: string, data: any, description?: string) => {
+    saveData: async (dataType: string, data: unknown, description?: string) => {
         const res = await client.post(`/api/v1/data/${dataType}`, {
             json_data: data,
             description,
@@ -28,7 +30,7 @@ export const gateway = {
         return res.data;
     },
 
-    getAllData: async (dataType: string, projection?: any) => {
+    getAllData: async (dataType: string, projection?: unknown) => {
         const res = await client.get(`/api/v1/data/${dataType}/all`, {
             // data: { projection } // Removing body from GET as it causes issues with some proxies/browsers
         });
@@ -40,7 +42,7 @@ export const gateway = {
         return res.data;
     },
 
-    updateData: async (dataType: string, id: string, data: any) => {
+    updateData: async (dataType: string, id: string, data: unknown) => {
         const res = await client.put(`/api/v1/data/${dataType}/one/${id}`, {
             json_data: data
         });
@@ -54,14 +56,9 @@ export const gateway = {
         return gateway.getAllData('conversations');
     },
 
-    saveConversation: async (conversationId: string | undefined, messages: any[], title: string = 'New Conversation') => {
+    saveConversation: async (conversationId: string | undefined, messages: Message[], title: string = 'New Conversation') => {
         if (conversationId) {
             // Update existing
-            // Note: In real app, we might want to fetch first to merge? Or just overwrite messages.
-            // Here we assume we have the full state including title.
-            // If the API supported partial PATCH for json_data it would be better, but we use PUT for the record.
-            // Wait, updateData uses PUT on /one/{id}, so we need to be careful not to lose other fields if any.
-            // For now, we just update messages and updated_at.
             return gateway.updateData('conversations', conversationId, {
                 messages,
                 title,
@@ -83,16 +80,16 @@ export const gateway = {
     },
 
     // AI Assistant
-    askAI: async (prompt: string, context?: string, jsonSchema?: any, history: any[] = [], language: string = 'fr') => {
+    askAI: async (prompt: string, context?: string, jsonSchema?: unknown, history: Message[] = [], language: string = 'fr') => {
         const systemInstruction = context
             ? `You are an expert scheduler assistant. Context: ${context}. IMPORTANT: Respond in ${language}.`
             : `You are an expert scheduler assistant. IMPORTANT: Respond in ${language}.`; // Default system instructions with language
 
-        const payload: any = {
+        const payload: Record<string, unknown> = {
             prompt,
             system_instruction: systemInstruction,
-            provider: 'google',
-            level: 'mid',
+            provider: 'google', // Force Gemini
+            level: 'mid', // Use default level
             history,
         };
 
@@ -118,7 +115,7 @@ export const gateway = {
     },
 
     // ===== PERSISTENCE =====
-    saveOrders: async (orders: any[]) => {
+    saveOrders: async (orders: ProductionOrder[]) => {
         return gateway.saveData('active_orders', orders, 'Current Production Orders');
     },
 
@@ -129,28 +126,32 @@ export const gateway = {
             const latest = res.results.sort((a: any, b: any) =>
                 new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
             )[0];
-            return latest.json_data;
+            return latest.json_data as ProductionOrder[];
         }
         return [];
     },
 
-    saveSchedule: async (schedule: any) => {
+    saveSchedule: async (schedule: ScheduleResult | null) => {
         return gateway.saveData('active_schedule', schedule, 'Latest Optimization Result');
     },
 
     loadSchedule: async () => {
         const res = await gateway.getAllData('active_schedule');
         if (res.results && res.results.length > 0) {
+            console.log(`[gateway] Found ${res.results.length} active_schedule records`);
             const latest = res.results.sort((a: any, b: any) =>
                 new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
             )[0];
-            return latest.json_data;
+            console.log("[gateway] Latest schedule created_at:", latest.created_at);
+            return latest.json_data as ScheduleResult;
         }
+        console.log("[gateway] No active_schedule records found");
         return null;
     },
 
-    simulateWhatIf: async (scenario: any, currentSolveRequest: any, currentTasks: any[]) => {
-        const res = await client.post('/api/v1/scheduling/whatif', {
+    simulateWhatIf: async (scenario: WhatIfScenario, currentSolveRequest: unknown, currentTasks: unknown[]) => {
+        const localBackend = axios.create({ baseURL: 'http://localhost:8000' });
+        const res = await localBackend.post('/whatif/simulate', {
             scenario,
             currentSolveRequest,
             currentTasks
@@ -158,8 +159,9 @@ export const gateway = {
         return res.data;
     },
 
-    solve: async (data: any) => {
-        const res = await client.post('/api/v1/scheduling/optimize', data);
+    solve: async (data: unknown) => {
+        const localBackend = axios.create({ baseURL: 'http://localhost:8000' });
+        const res = await localBackend.post('/solve', data);
         return res.data;
     }
 };

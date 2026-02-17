@@ -22,7 +22,7 @@ const ORDER_TYPE_ICONS: Record<OrderType, React.ReactNode> = {
 
 export default function OrderManager({ orders, activeConfig, onUpdate }: OrderManagerProps) {
     const { t } = useTranslation('schedule');
-    const tCommon = (key: string) => useTranslation('common').t(key);
+    const { t: tCommon } = useTranslation('common');
 
     const [isAdding, setIsAdding] = useState(false);
     const [newOrder, setNewOrder] = useState<Partial<ProductionOrder>>({
@@ -396,7 +396,7 @@ export default function OrderManager({ orders, activeConfig, onUpdate }: OrderMa
                             <select
                                 className="w-full p-2 text-sm border border-slate-300 rounded-lg"
                                 value={newOrder.priority}
-                                onChange={e => setNewOrder({ ...newOrder, priority: e.target.value as any })}
+                                onChange={e => setNewOrder({ ...newOrder, priority: e.target.value as 'low' | 'normal' | 'high' | 'urgent' })}
                             >
                                 <option value="low">{tCommon('priority.low')}</option>
                                 <option value="normal">{tCommon('priority.normal')}</option>
@@ -467,16 +467,16 @@ export default function OrderManager({ orders, activeConfig, onUpdate }: OrderMa
                                             <select
                                                 value={order.priority}
                                                 onChange={(e) => {
-                                                    const newPriority = e.target.value as any;
+                                                    const newPriority = e.target.value as 'low' | 'normal' | 'high' | 'urgent';
                                                     const updated = orders.map(o =>
                                                         o.id === order.id ? { ...o, priority: newPriority } : o
                                                     );
                                                     onUpdate(updated);
                                                 }}
                                                 className={`px-2 py-1 rounded-full text-xs font-bold border-none cursor-pointer focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 outline-none appearance-none pr-6 bg-no-repeat bg-[center_right_0.5rem] ${order.priority === 'urgent' ? 'bg-red-100 text-red-700' :
-                                                        order.priority === 'high' ? 'bg-amber-100 text-amber-700' :
-                                                            order.priority === 'low' ? 'bg-slate-100 text-slate-600' :
-                                                                'bg-emerald-100 text-emerald-700'
+                                                    order.priority === 'high' ? 'bg-amber-100 text-amber-700' :
+                                                        order.priority === 'low' ? 'bg-slate-100 text-slate-600' :
+                                                            'bg-emerald-100 text-emerald-700'
                                                     }`}
                                                 style={{
                                                     // Cheap way to hide arrow or style it if needed, using unicode arrow for simplicity

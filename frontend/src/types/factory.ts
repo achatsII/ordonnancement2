@@ -96,6 +96,7 @@ export interface ProductionOrder {
     priority: 'low' | 'normal' | 'high' | 'urgent';
     status: 'draft' | 'pending' | 'scheduled' | 'in_progress' | 'completed';
     color?: string;
+    description?: string;
 
     // Type-specific details
     color_change_details?: {
@@ -143,10 +144,12 @@ export interface SolvedTaskResult {
 }
 
 export interface ScheduleResult {
+    status?: string; // e.g. 'success', 'failed'
     tasks: SolvedTaskResult[];
     makespan: number;
     logs: string[];
     updatedAt: string;
+    error?: string;
 }
 
 export interface Machine {
