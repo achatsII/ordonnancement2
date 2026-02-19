@@ -15,8 +15,6 @@ import {
     MessageCircle,
     MoreHorizontal,
     X,
-    Package,
-    Loader2,
     ChevronDown,
     AlertTriangle,
     CalendarClock
@@ -24,30 +22,30 @@ import {
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+    FactoryConfig,
+    Message,
     Conversation,
     ConversationMode,
-    FactoryConfig,
-    EmptyFactoryConfig,
-    Message,
-    ProductionOrder,
-    Job,
     Machine,
     Operator,
-    // SetupTime,
-    // TemporalConstraint,
-    // BatchConstraint,
-    // MaintenanceConstraint,
+    ProductionOrder,
+    Job,
+    EmptyFactoryConfig,
+    HistoryItem
 } from '@/types/factory';
 import FactoryAssetList from '@/components/FactoryAssetList';
 import ConstraintsList from '@/components/ConstraintsList';
 import ExtractedOrdersList from '@/components/ExtractedOrdersList';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useProductionState } from '@/contexts/ProductionStateContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function FactoryChat() {
     const { language } = useLanguage();
+    const { reload: reloadProductionState } = useProductionState();
     const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [isLoadingConversations, setIsLoadingConversations] = useState(true);
     const [currentId, setCurrentId] = useState<string | null>(null);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -171,14 +169,23 @@ export default function FactoryChat() {
 
     const loadConversations = async () => {
         console.log("=== LOAD CONVERSATIONS START ===");
+        setIsLoadingConversations(true);
         try {
             const res = await gateway.getConversations();
+            console.log("=== LOAD CONVERSATIONS RESPONSE ===");
+            console.log("Raw results count:", res.results?.length);
+            if (res.results && res.results.length > 0) {
+                console.log("First raw doc:", res.results[0]);
+                console.log("First raw json_data:", res.results[0].json_data);
+            }
+
             const list = res.results || [];
             list.sort((a: any, b: any) => new Date(b.json_data?.updatedAt || 0).getTime() - new Date(a.json_data?.updatedAt || 0).getTime());
 
             const formatted: Conversation[] = list.map((item: any) => {
                 const conv = {
                     _id: item._id,
+                    mode: item.json_data?.mode || 'config',
                     ...item.json_data
                 };
 
@@ -193,7 +200,10 @@ export default function FactoryChat() {
                 return conv;
             });
 
-            console.log("Loaded conversations:", formatted.length);
+            console.log("Loaded formatted conversations:", formatted.length);
+            if (formatted.length > 0) {
+                console.log("First formatted conv:", formatted[0]);
+            }
             setConversations(formatted);
 
             if (formatted.length > 0 && !currentId) {
@@ -205,6 +215,8 @@ export default function FactoryChat() {
             console.log("=== LOAD CONVERSATIONS END ===");
         } catch (e) {
             console.error("=== LOAD CONVERSATIONS ERROR ===", e);
+        } finally {
+            setIsLoadingConversations(false);
         }
     };
 
@@ -639,6 +651,15 @@ Tell me about your orders!`;
 
                 setPendingProducts(updatedPendingProducts);
                 setPendingOrders(updatedPendingOrders);
+
+                // RELOAD PRODUCTION STATE to reflect changes (Optimization, Orders, Config)
+                console.log("Reloading Production State...");
+                try {
+                    await reloadProductionState();
+                    console.log("Production State Reloaded");
+                } catch (e) {
+                    console.error("Failed to reload production state:", e);
+                }
             } else {
                 assistantText = typeof answer === 'string' ? answer : JSON.stringify(answer);
             }
@@ -840,21 +861,32 @@ Tell me about your orders!`;
     const handleSaveOrders = async (replaceActive: boolean = false) => {
         console.log("=== handleSaveOrders START ===", { replaceActive });
 
+        console.log("🔵 [SAVE] handleSaveOrders CALLED", { replaceActive });
+        console.log("🔵 [SAVE] pendingOrders:", pendingOrders.length, pendingOrders);
+        console.log("🔵 [SAVE] pendingProducts:", pendingProducts.length, pendingProducts);
+        console.log("🔵 [SAVE] currentId:", currentId);
+        console.log("🔵 [SAVE] activeConversation:", activeConversation?._id, activeConversation?.mode);
+
         if (pendingOrders.length === 0 && pendingProducts.length === 0) {
+            console.warn("🟡 [SAVE] No pending items, returning early");
             return;
         }
 
         const confirmMsg = replaceActive
             ? "Cela va SUPPRIMER tous les produits et commandes existants et les remplacer par ceux-ci. Continuer ?"
             : "Cela va AJOUTER ces produits et commandes aux existants. Continuer ?";
-        if (!confirm(confirmMsg)) return;
+        if (!confirm(confirmMsg)) {
+            console.warn("🟡 [SAVE] User cancelled confirm dialog");
+            return;
+        }
 
         setIsSavingOrders(true);
         try {
             // 1. Save products (typical_jobs) to active config
             if (pendingProducts.length > 0) {
-                console.log("--- Saving Products ---");
+                console.log("🟢 [SAVE] Step 1: Saving Products...");
                 const configRes = await gateway.getAllData('active_factory_config');
+                console.log("🟢 [SAVE] Config response:", configRes);
 
                 let currentConfig: FactoryConfig = { ...EmptyFactoryConfig };
                 let existingConfigId: string | null = null;
@@ -865,44 +897,47 @@ Tell me about your orders!`;
                     )[0];
                     currentConfig = latest.json_data || latest;
                     existingConfigId = latest._id;
+                    console.log("🟢 [SAVE] Existing config found, id:", existingConfigId);
+                } else {
+                    console.log("🟢 [SAVE] No existing config, creating new one");
                 }
 
                 if (replaceActive) {
-                    // REPLACE: reset typical_jobs to ONLY the new pending products
                     currentConfig.typical_jobs = [...pendingProducts];
                 } else {
-                    // ADD: merge, dedup by name
                     const existingNames = currentConfig.typical_jobs?.map(j => j.name.toLowerCase()) || [];
                     const newProducts = pendingProducts.filter(p => !existingNames.includes(p.name.toLowerCase()));
                     currentConfig.typical_jobs = [...(currentConfig.typical_jobs || []), ...newProducts];
                 }
 
-                // Save — only touching typical_jobs, machines/operators/constraints untouched
                 if (existingConfigId) {
-                    await gateway.updateData('active_factory_config', existingConfigId, currentConfig);
+                    const saveResult = await gateway.updateData('active_factory_config', existingConfigId, currentConfig);
+                    console.log("🟢 [SAVE] Products updateData result:", saveResult);
                 } else {
-                    await gateway.saveData('active_factory_config', currentConfig, 'Factory Configuration');
+                    const saveResult = await gateway.saveData('active_factory_config', currentConfig, 'Factory Configuration');
+                    console.log("🟢 [SAVE] Products saveData result:", saveResult);
                 }
-                console.log("Products saved");
+
+                // RELOAD PRODUCTION STATE to reflect changes (Optimization, Orders, Config)
+                console.log("Reloading Production State...");
+                try {
+                    await reloadProductionState();
+                    console.log("Production State Reloaded");
+                } catch (e) {
+                    console.error("Failed to reload production state:", e);
+                }
+
+            } else {
+                console.log("⏭️ [SAVE] No pending products, skipping step 1");
             }
 
             // 2. Save orders
             if (pendingOrders.length > 0) {
-                console.log("--- Saving Orders ---");
-                const ordersRes = await gateway.getAllData('production_orders');
+                console.log("🟢 [SAVE] Step 2: Saving Orders...");
 
-                let existingOrders: ProductionOrder[] = [];
-                let existingOrdersId: string | null = null;
+                const existingOrders = await gateway.loadOrders();
+                console.log("🟢 [SAVE] Existing orders loaded:", existingOrders.length);
 
-                if (ordersRes.results && ordersRes.results.length > 0) {
-                    const latest = ordersRes.results.sort((a: any, b: any) =>
-                        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                    )[0];
-                    existingOrders = latest.json_data?.orders || [];
-                    existingOrdersId = latest._id;
-                }
-
-                // Link orders to product IDs if possible
                 const configRes2 = await gateway.getAllData('active_factory_config');
                 let config: FactoryConfig | null = null;
                 if (configRes2.results && configRes2.results.length > 0) {
@@ -924,29 +959,107 @@ Tell me about your orders!`;
                     return order;
                 });
 
-                // REPLACE: only new orders. ADD: merge with existing.
                 const allOrders = replaceActive ? ordersWithProductIds : [...existingOrders, ...ordersWithProductIds];
+                console.log("🟢 [SAVE] Total orders to save:", allOrders.length);
 
-                if (existingOrdersId) {
-                    await gateway.updateData('production_orders', existingOrdersId, { orders: allOrders });
-                } else {
-                    await gateway.saveData('production_orders', { orders: allOrders }, 'Production Orders');
+                const saveResult = await gateway.saveOrders(allOrders);
+                console.log("✅ [SAVE] Orders saved to active_orders, result:", saveResult);
+
+                // VERIFICATION: immediately re-load to check persistence
+                const verifyRes = await gateway.getAllData('active_orders');
+                console.log("🔍 [VERIFY] active_orders raw response:", JSON.stringify(verifyRes, null, 2));
+                console.log("🔍 [VERIFY] active_orders count:", verifyRes.results?.length || 0);
+                if (verifyRes.results && verifyRes.results.length > 0) {
+                    verifyRes.results.forEach((doc: any, i: number) => {
+                        console.log(`🔍 [VERIFY] Doc ${i}:`, {
+                            _id: doc._id,
+                            created_at: doc.created_at,
+                            description: doc.description,
+                            json_data_type: typeof doc.json_data,
+                            json_data_isArray: Array.isArray(doc.json_data),
+                            json_data_length: Array.isArray(doc.json_data) ? doc.json_data.length : 'N/A'
+                        });
+                    });
                 }
-                console.log("Orders saved");
+            } else {
+                console.log("⏭️ [SAVE] No pending orders, skipping step 2");
             }
 
-            // Clear pending items
-            const savedProductsCount = pendingProducts.length;
-            const savedOrdersCount = pendingOrders.length;
-            await persistPendingItems([], []);
-            setPendingOrders([]);
-            setPendingProducts([]);
+            // 3. History Log Creation
+            console.log("🟢 [SAVE] Step 3: Creating history items...");
+            const newHistoryItems: HistoryItem[] = [];
+            const timestamp = new Date().toISOString();
+
+            pendingProducts.forEach(p => {
+                newHistoryItems.push({
+                    id: self.crypto.randomUUID(),
+                    type: 'product',
+                    timestamp,
+                    summary: `Product: ${p.name}`,
+                    data: p
+                });
+            });
+
+            pendingOrders.forEach(o => {
+                newHistoryItems.push({
+                    id: self.crypto.randomUUID(),
+                    type: 'order',
+                    timestamp,
+                    summary: o.type === 'production' ? `Order: ${o.quantity}x ${o.product_name}` : `Order: ${o.type}`,
+                    data: o
+                });
+            });
+
+            console.log("🟢 [SAVE] New history items:", newHistoryItems.length, newHistoryItems);
+
+            // 4. Update Conversation History & Clear Pending Items
+            if (activeConversation) {
+                // Initialize next state from current state
+                const nextConv = { ...activeConversation };
+
+                // A. Update History
+                if (newHistoryItems.length > 0) {
+                    const existingHistory = nextConv.historyLog || [];
+                    const updatedHistory = [...newHistoryItems, ...existingHistory].slice(0, 50);
+                    nextConv.historyLog = updatedHistory;
+                }
+
+                // B. Clear Pending Items
+                const savedProductsCount = pendingProducts.length;
+                const savedOrdersCount = pendingOrders.length;
+                nextConv.pendingOrders = [];
+                nextConv.pendingProducts = [];
+                nextConv.updatedAt = new Date().toISOString();
+
+                // C. Update Local State
+                setPendingOrders([]);
+                setPendingProducts([]);
+                setConversations(prev => prev.map(c => c._id === currentId ? nextConv : c));
+                console.log("🟢 [SAVE] Local state updated with History + Cleared Pending");
+
+                // D. Persist FULL object to DB
+                if (currentId) {
+                    // We must send the FULL object because updateData (PUT) replaces the json_data content
+                    // Extract _id to avoid sending it in json_data if not needed (though gateway.ts usually handles it)
+                    const { _id, ...cleanConv } = nextConv;
+
+                    const dbResult = await gateway.updateData('conversations', currentId, cleanConv);
+                    console.log("✅ [SAVE] Full conversation persisted to DB (History + Cleared Pending)", dbResult);
+                } else {
+                    console.warn("🟡 [SAVE] No currentId, conversation NOT persisted to DB!");
+                }
+
+                console.log("✅✅ [SAVE] handleSaveOrders COMPLETE", { savedProductsCount, savedOrdersCount });
+                alert(`✅ ${replaceActive ? 'Remplacé' : 'Ajouté'} ! ${savedProductsCount} produit(s) et ${savedOrdersCount} commande(s).`);
+            } else {
+                console.warn("🟡 [SAVE] No active conversation found");
+            }
+
             setActiveSidebarTab('config');
 
-            console.log("=== handleSaveOrders SUCCESS ===");
-            alert(`✅ ${replaceActive ? 'Remplacé' : 'Ajouté'} ! ${savedProductsCount} produit(s) et ${savedOrdersCount} commande(s).`);
+
         } catch (e) {
-            console.error("=== handleSaveOrders ERROR ===", e);
+            console.error("❌ [SAVE] handleSaveOrders ERROR", e);
             alert("Erreur lors de la sauvegarde");
         } finally {
             setIsSavingOrders(false);
@@ -975,7 +1088,7 @@ Tell me about your orders!`;
         if (activeConversation.mode === 'config') {
             const hasPending = pendingOrders.length > 0 || pendingProducts.length > 0;
             return (
-                <div className="h-full flex flex-col w-80 bg-slate-50 border-l border-slate-200 overflow-hidden">
+                <div className="h-full flex flex-col w-97 bg-slate-50 border-l border-slate-200 overflow-hidden">
                     {/* Tabs Header */}
                     <div className="flex border-b border-slate-200 bg-white">
                         <button
@@ -1045,86 +1158,17 @@ Tell me about your orders!`;
                                 )}
                             </div>
                         ) : (
-                            <div className="p-4">
-                                <h3 className="font-bold text-emerald-700 mb-4 flex items-center gap-2">
-                                    <Package size={18} /> Éléments Extraits
-                                </h3>
-
-                                {hasPending ? (
-                                    <div className="space-y-6">
-                                        {pendingProducts.length > 0 && (
-                                            <div className="space-y-2">
-                                                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Nouveaux Produits</p>
-                                                {pendingProducts.map(p => (
-                                                    <div key={p.id} className="p-3 bg-white rounded-xl border border-emerald-100 shadow-sm flex justify-between items-center group">
-                                                        <span className="font-medium text-slate-700">{p.name}</span>
-                                                        <button onClick={() => handleRemovePendingProduct(p.id)} className="p-1 hover:bg-red-50 text-red-400 hover:text-red-600 rounded transition-colors">
-                                                            <X size={14} />
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        {pendingOrders.length > 0 && (
-                                            <div className="space-y-2">
-                                                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Nouvelles Commandes</p>
-                                                {pendingOrders.map(o => (
-                                                    <div key={o.id} className="p-3 bg-white rounded-xl border border-emerald-100 shadow-sm flex flex-col gap-1 group relative">
-                                                        <div className="flex justify-between items-start">
-                                                            <span className="font-bold text-slate-800 text-sm">
-                                                                {o.product_name || o.type}
-                                                            </span>
-                                                            <button onClick={() => handleRemovePendingOrder(o.id)} className="p-1 hover:bg-red-50 text-red-400 hover:text-red-600 rounded transition-colors">
-                                                                <X size={14} />
-                                                            </button>
-                                                        </div>
-                                                        <p className="text-[11px] text-slate-500 italic">
-                                                            {o.description || (o.type === 'production' ? `Qté: ${o.quantity}` : o.type)}
-                                                        </p>
-                                                        <div className="flex items-center gap-2 mt-1">
-                                                            <span className={cn(
-                                                                "px-1.5 py-0.5 rounded text-[10px] font-bold uppercase",
-                                                                o.priority === 'urgent' ? "bg-red-100 text-red-700" :
-                                                                    o.priority === 'high' ? "bg-orange-100 text-orange-700" :
-                                                                        "bg-blue-100 text-blue-700"
-                                                            )}>
-                                                                {o.priority}
-                                                            </span>
-                                                            {o.deadline && <span className="text-[10px] text-slate-400">{o.deadline}</span>}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-
-                                        <div className="grid grid-cols-1 gap-2 pt-4 border-t border-slate-200">
-                                            <button
-                                                onClick={() => handleSaveOrders(false)}
-                                                disabled={isSavingOrders}
-                                                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-sm flex items-center justify-center gap-2 transition-all"
-                                            >
-                                                {isSavingOrders ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                                                Ajouter commandes et produits
-                                            </button>
-                                            <button
-                                                onClick={() => handleSaveOrders(true)}
-                                                disabled={isSavingOrders}
-                                                className="w-full py-2.5 border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-all"
-                                            >
-                                                {isSavingOrders ? <Loader2 size={16} className="animate-spin" /> : <X size={16} />}
-                                                Tout remplacer
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center py-12 text-slate-400 grayscale opacity-50">
-                                        <Package size={32} className="mb-2" />
-                                        <p className="text-xs">Aucun élément extrait en attente</p>
-                                    </div>
-                                )}
-                            </div>
+                            <ExtractedOrdersList
+                                pendingOrders={pendingOrders}
+                                pendingProducts={pendingProducts}
+                                onRemoveOrder={handleRemovePendingOrder}
+                                onRemoveProduct={handleRemovePendingProduct}
+                                onSave={handleSaveOrders}
+                                isSaving={isSavingOrders}
+                                historyLog={activeConversation.historyLog}
+                            />
                         )}
+
                     </div>
                 </div>
             );
@@ -1158,6 +1202,7 @@ Tell me about your orders!`;
                     onRemoveProduct={handleRemovePendingProduct}
                     onSave={handleSaveOrders}
                     isSaving={isSavingOrders}
+                    historyLog={activeConversation.historyLog}
                 />
             );
         }
@@ -1512,39 +1557,50 @@ Tell me about your orders!`;
                             </button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                            {conversations.map(conv => (
-                                <div
-                                    key={conv._id}
-                                    onClick={() => setCurrentId(conv._id!)}
-                                    className={cn(
-                                        "p-3 rounded-xl cursor-pointer flex justify-between items-start group transition-all",
-                                        currentId === conv._id ? "bg-white shadow-sm border border-blue-100" : "hover:bg-slate-100"
-                                    )}
-                                >
-                                    <div className="flex gap-3 overflow-hidden">
-                                        <div className={cn(
-                                            "mt-1 w-2 h-2 rounded-full shrink-0",
-                                            conv.mode === 'config' ? "bg-blue-400" :
-                                                conv.mode === 'whatif' ? "bg-indigo-400" :
-                                                    conv.mode === 'orders' ? "bg-emerald-400" : "bg-slate-400"
-                                        )} />
-                                        <div className="min-w-0">
-                                            <p className={cn("truncate text-sm font-medium", currentId === conv._id ? "text-blue-700" : "text-slate-700")}>
-                                                {conv.title}
-                                            </p>
-                                            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mt-0.5">
-                                                {conv.mode}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={(e) => deleteConversation(conv._id!, e)}
-                                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-400 hover:text-red-600 rounded transition-all"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
+                            {isLoadingConversations ? (
+                                <div className="flex justify-center py-8">
+                                    <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                                 </div>
-                            ))}
+                            ) : (
+                                conversations.map(conv => (
+                                    <div
+                                        key={conv._id}
+                                        onClick={() => setCurrentId(conv._id!)}
+                                        className={cn(
+                                            "p-3 rounded-xl cursor-pointer flex justify-between items-start group transition-all",
+                                            currentId === conv._id ? "bg-white shadow-sm border border-blue-100" : "hover:bg-slate-100"
+                                        )}
+                                    >
+                                        <div className="flex gap-3 overflow-hidden">
+                                            <div className={cn(
+                                                "mt-1 w-2 h-2 rounded-full shrink-0",
+                                                conv.mode === 'config' ? "bg-blue-400" :
+                                                    conv.mode === 'whatif' ? "bg-indigo-400" :
+                                                        conv.mode === 'orders' ? "bg-emerald-400" : "bg-slate-400"
+                                            )} />
+                                            <div className="min-w-0">
+                                                <p className={cn("truncate text-sm font-medium", currentId === conv._id ? "text-blue-700" : "text-slate-700")}>
+                                                    {conv.title}
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mt-0.5">
+                                                    {conv.mode}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={(e) => deleteConversation(conv._id!, e)}
+                                            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-400 hover:text-red-600 rounded transition-all"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                ))
+                            )}
+                            {!isLoadingConversations && conversations.length === 0 && (
+                                <div className="text-center py-8 text-slate-400 text-sm">
+                                    No conversations yet
+                                </div>
+                            )}
                         </div>
                     </motion.div>
                 )}
@@ -1641,7 +1697,7 @@ Tell me about your orders!`;
                         </div>
                     )}
 
-                    {activeConversation?.messages.map((msg, idx) => (
+                    {(activeConversation?.messages || []).map((msg, idx) => (
                         <div key={idx} className={cn("flex gap-4 max-w-3xl mx-auto", msg.role === 'user' ? "flex-row-reverse" : "flex-row")}>
                             <div className={cn(
                                 "w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm",

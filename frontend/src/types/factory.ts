@@ -202,8 +202,17 @@ export interface Conversation {
     factoryConfig?: FactoryConfig;
     pendingOrders?: ProductionOrder[];
     pendingProducts?: Job[];
+    historyLog?: HistoryItem[];
     createdAt?: string;
     updatedAt?: string;
+}
+
+export interface HistoryItem {
+    id: string;
+    type: 'order' | 'product';
+    timestamp: string;
+    summary: string;
+    data: ProductionOrder | Job;
 }
 
 export const EmptyFactoryConfig: FactoryConfig = {

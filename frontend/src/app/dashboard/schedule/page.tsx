@@ -116,7 +116,7 @@ export default function SchedulePage() {
                                 id: `${order.id}-task-${idx}`,
                                 name: op.name,
                                 eligibleLines: eligibleMachines,
-                                duration: Math.ceil(op.duration_minutes),
+                                duration: Math.ceil(op.duration_minutes * (order.quantity || 1)),
                                 skill: op.machine_capability_required || 'general',
                                 order: idx
                             };
@@ -263,7 +263,7 @@ export default function SchedulePage() {
                                     id: `${order.id}-task-${idx}`,
                                     name: op.name,
                                     eligibleLines: eligibleMachines,
-                                    duration: Math.ceil(op.duration_minutes),
+                                    duration: Math.ceil(op.duration_minutes * (order.quantity || 1)),
                                     skill: op.machine_capability_required || 'general',
                                     order: idx
                                 };

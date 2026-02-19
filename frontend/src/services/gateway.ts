@@ -22,10 +22,14 @@ export const gateway = {
 
     // Data (CRUD)
     saveData: async (dataType: string, data: unknown, description?: string) => {
+        // API requires app_identifier inside json_data
+        const jsonData = typeof data === 'object' && data !== null && !Array.isArray(data)
+            ? { ...data as Record<string, unknown>, app_identifier: 'ordonnancement-app' }
+            : { data, app_identifier: 'ordonnancement-app' };
+
         const res = await client.post(`/api/v1/data/${dataType}`, {
-            json_data: data,
+            json_data: jsonData,
             description,
-            app_identifier: 'ordonnancement-app'
         });
         return res.data;
     },
@@ -126,7 +130,15 @@ export const gateway = {
             const latest = res.results.sort((a: any, b: any) =>
                 new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
             )[0];
-            return latest.json_data as ProductionOrder[];
+            const rawData = latest.json_data;
+            // Handle both { data: [...] } (new format) and direct array (legacy format)
+            if (Array.isArray(rawData)) {
+                return rawData as ProductionOrder[];
+            }
+            if (rawData?.data && Array.isArray(rawData.data)) {
+                return rawData.data as ProductionOrder[];
+            }
+            return [];
         }
         return [];
     },
